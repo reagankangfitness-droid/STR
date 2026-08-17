@@ -249,6 +249,10 @@ button:disabled {
   margin-top: 26px;
 }
 
+.maxes-list {
+  margin-top: 26px;
+}
+
 .section-label {
   padding: 11px 0;
   border-top: 1px solid var(--rule);
@@ -315,6 +319,46 @@ button:disabled {
 
 .footnote {
   padding-top: 12px;
+}
+
+.max-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 74px 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.max-row span {
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.max-row button {
+  min-height: 44px;
+  border: 1px solid var(--field);
+  background: transparent;
+  color: var(--ink);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.max-row strong {
+  font-family: "Bebas Neue", sans-serif;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 0.95;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.max-row em {
+  color: var(--ink-45);
+  font-size: 14px;
+  font-style: normal;
 }
 
 .why-panel {
@@ -579,11 +623,22 @@ button:disabled {
 .stepper button {
   min-height: 44px;
   border: 0;
+  border-right: 1px solid var(--rule-soft);
   background: transparent;
   color: var(--ink);
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   font-weight: 500;
+}
+
+.stepper button:nth-of-type(4n) {
+  border-right: 0;
+}
+
+.stepper .delete-set {
+  grid-column: 3 / -1;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--amber);
 }
 
 .stepper span {
