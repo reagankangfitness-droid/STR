@@ -1,60 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 type Tab = 'today' | 'log' | 'history' | 'progress'
+type Lift = 'squat' | 'bench' | 'deadlift' | 'press'
 
-type Block = {
+type Profile = { name: string; level: 'Novice' | 'Intermediate' | 'Advanced'; units: 'kg' | 'lb' }
+type Maxes = { squat: number; bench: number; deadlift: number; press: number }
+
+type PlannedExercise = {
   id: string
   name: string
-  weeks: 4
-  startDate: string
+  category: 'Squat' | 'Bench' | 'Deadlift' | 'Press' | 'Hinge' | 'Pull' | 'Accessory'
+  lift?: Lift
+  pctOfMax?: number
+  sets: number
+  reps: number
+  rpe?: number
 }
 
-type PlannedSet = { kg: number | null; reps: number; rpeCap?: number }
-type PlannedItem = {
-  id: string
-  name: string
-  detail: string
-  kind: 'warmup' | 'skill' | 'acl' | 'main' | 'accessory' | 'metcon' | 'engine'
-  meta?: string
-  sets?: PlannedSet[]
-  adjustable: boolean
-}
-
-type PlannedDay = {
-  date: string
-  week: 1 | 2 | 3 | 4
-  title: string
-  summary: string
-  items: PlannedItem[]
-  fuel: {
-    kcal: number
-    proteinG: number
-    carbEmphasis: 'Lower' | 'Moderate' | 'Moderate-high' | 'High' | 'Very high'
-    fluidL: number
-  }
-}
+type Workout = { id: string; name: string; detail: string; exercises: PlannedExercise[] }
 
 type Checkin = {
   date: string
+  overall: 1 | 2 | 3 | 4 | 5
   sleep: 1 | 2 | 3 | 4 | 5
   soreness: 1 | 2 | 3 | 4 | 5
-  overall: 1 | 2 | 3 | 4 | 5
+  sorenessArea?: 'Legs' | 'Chest' | 'Back' | 'Shoulders' | 'Full body'
   note?: string
 }
 
-type LoggedSet = {
-  itemId: string
-  index: number
-  kg: number
-  reps: number
-  rpe: number | null
-  at: string
-}
+type LoggedSet = { exerciseId: string; index: number; kg: number; reps: number; rpe: number | null; at: string }
 
 type Session = {
+  id: string
   date: string
-  dayTitle: string
+  workoutName: string
   readiness: number
   sets: LoggedSet[]
   durationMin: number
@@ -62,206 +42,133 @@ type Session = {
   note?: string
 }
 
-type AppState = {
-  checkins: Record<string, Checkin>
+type SyncState = { online: boolean; queued: number }
+
+type StoredState = {
+  profile: Profile
+  maxes: Maxes
+  workouts: Workout[]
+  checkin: Checkin
   sessions: Session[]
-  activeDate: string
-  activeStartedAt: string | null
+  sync: SyncState
+  activeWorkoutId: string
   activeSets: LoggedSet[]
+  activeStartedAt: string | null
   restStartedAt: string | null
-  queued: number
+  selectedLift: Lift
+}
+
+type TargetResult = {
+  exercise: PlannedExercise
+  kg: number | null
+  adj: number
+  basis: string
+  factors: Array<{ label: string; value: number }>
 }
 
 const storageKey = 'sb.v1'
 const tabs: Tab[] = ['today', 'log', 'history', 'progress']
 const restSeconds = 180
 
-const block: Block = {
-  id: 'block-1',
-  name: 'Block 1 — Build the Athlete + ACL RTS',
-  weeks: 4,
-  startDate: '2026-08-17',
-}
+const profile: Profile = { name: 'Reagan', level: 'Intermediate', units: 'kg' }
+const maxes: Maxes = { squat: 150, bench: 100, deadlift: 185, press: 65 }
 
-const days: PlannedDay[] = [
+const workouts: Workout[] = [
   {
-    date: '2026-08-17',
-    week: 1,
-    title: 'Force / + Landing',
-    summary: 'Squat force, landing quality, and controlled unilateral work.',
-    fuel: { kcal: 2800, proteinG: 200, carbEmphasis: 'High', fluidL: 3.5 },
-    items: [
-      {
-        id: 'mon-warmup',
-        name: 'Prep series',
-        detail: 'Bike 5 min · hip flow · ankle rocks',
-        kind: 'warmup',
-        meta: '10 MIN',
-        adjustable: false,
-      },
-      {
-        id: 'mon-landing',
-        name: 'Landing mechanics',
-        detail: 'Snap-down + box landing · stick every rep',
-        kind: 'acl',
-        meta: 'GATED',
-        sets: [
-          { kg: 0, reps: 5 },
-          { kg: 0, reps: 5 },
-        ],
-        adjustable: false,
-      },
-      {
-        id: 'mon-squat',
-        name: 'Back squat',
-        detail: '5 × 5 · ramp bar/60/80/100/110',
-        kind: 'main',
-        meta: 'RPE 8 CAP',
-        sets: [
-          { kg: 125, reps: 5, rpeCap: 8 },
-          { kg: 125, reps: 5, rpeCap: 8 },
-          { kg: 125, reps: 5, rpeCap: 8 },
-          { kg: 125, reps: 5, rpeCap: 8 },
-          { kg: 125, reps: 5, rpeCap: 8 },
-        ],
-        adjustable: true,
-      },
-      {
-        id: 'mon-rdl',
-        name: 'Romanian deadlift',
-        detail: '2 × 8 · hamstring tension, no reach',
-        kind: 'accessory',
-        meta: 'RPE 7',
-        sets: [
-          { kg: 100, reps: 8, rpeCap: 7 },
-          { kg: 100, reps: 8, rpeCap: 7 },
-        ],
-        adjustable: false,
-      },
-      {
-        id: 'mon-split',
-        name: 'Rear-foot split squat',
-        detail: '3 × 8 each · knee tracks clean',
-        kind: 'accessory',
-        meta: 'QUALITY',
-        adjustable: false,
-      },
-      {
-        id: 'mon-engine',
-        name: 'Zone 2 flush',
-        detail: 'Bike easy nasal breathing',
-        kind: 'engine',
-        meta: '12 MIN',
-        adjustable: false,
-      },
+    id: 'lower-strength',
+    name: 'Lower Strength',
+    detail: 'Squat focus with hinge volume',
+    exercises: [
+      { id: 'back-squat', name: 'Back Squat', category: 'Squat', lift: 'squat', pctOfMax: 0.7, sets: 3, reps: 5, rpe: 8 },
+      { id: 'romanian-deadlift', name: 'Romanian Deadlift', category: 'Hinge', sets: 3, reps: 8, rpe: 7 },
+      { id: 'split-squat', name: 'Split Squat', category: 'Accessory', sets: 3, reps: 8, rpe: 8 },
+      { id: 'ham-curl', name: 'Ham Curl', category: 'Accessory', sets: 3, reps: 10, rpe: 8 },
     ],
   },
   {
-    date: '2026-08-18',
-    week: 1,
-    title: 'Gymnastics',
-    summary: 'Strict positions, scap control, and low-fatigue skill volume.',
-    fuel: { kcal: 2750, proteinG: 200, carbEmphasis: 'Moderate-high', fluidL: 3.2 },
-    items: [
-      { id: 'tue-scap', name: 'Scap prep', detail: 'Hangs · hollow · arch', kind: 'skill', meta: '12 MIN', adjustable: false },
-      { id: 'tue-pull', name: 'Strict pull-up', detail: '5 × 4 · perfect ribs', kind: 'skill', meta: 'RPE 7', adjustable: false },
-      { id: 'tue-hsw', name: 'Handstand walk', detail: 'Skill lanes · stop before fatigue', kind: 'skill', meta: '18 MIN', adjustable: false },
-    ],
-  },
-  {
-    date: '2026-08-19',
-    week: 1,
-    title: 'Power + Engine',
-    summary: 'Clean speed, controlled barbell cycling, and aerobic finish.',
-    fuel: { kcal: 3100, proteinG: 200, carbEmphasis: 'Very high', fluidL: 3.8 },
-    items: [
-      { id: 'wed-clean', name: 'Clean pull + clean', detail: '6 × 2 · fast extension', kind: 'main', meta: 'RPE 7', sets: [{ kg: 105, reps: 2 }, { kg: 105, reps: 2 }, { kg: 105, reps: 2 }, { kg: 105, reps: 2 }, { kg: 105, reps: 2 }, { kg: 105, reps: 2 }], adjustable: true },
-      { id: 'wed-engine', name: 'Bike intervals', detail: '6 rounds · 90 hard / 90 easy', kind: 'engine', meta: '18 MIN', adjustable: false },
-    ],
-  },
-  {
-    date: '2026-08-20',
-    week: 1,
-    title: 'ACL RTS',
-    summary: 'Return-to-sport gate, landing mechanics, and tissue tolerance.',
-    fuel: { kcal: 2550, proteinG: 200, carbEmphasis: 'Lower', fluidL: 3 },
-    items: [
-      { id: 'thu-gate', name: 'ACL gate', detail: 'No pain, swelling, instability, or mechanics drop', kind: 'acl', meta: 'GATED', adjustable: false },
-      { id: 'thu-hop', name: 'Hop and stick', detail: '3 × 5 each side', kind: 'acl', meta: 'QUALITY', adjustable: false },
-    ],
-  },
-  {
-    date: '2026-08-21',
-    week: 1,
-    title: 'Snatch / + Upper',
-    summary: 'Snatch timing, upper push-pull strength, and gymnastics touch.',
-    fuel: { kcal: 3100, proteinG: 200, carbEmphasis: 'Very high', fluidL: 3.8 },
-    items: [
-      { id: 'fri-snatch', name: 'Snatch complex', detail: 'Power snatch + hang snatch', kind: 'main', meta: 'RPE 7', sets: [{ kg: 70, reps: 2 }, { kg: 72.5, reps: 2 }, { kg: 75, reps: 2 }, { kg: 75, reps: 2 }], adjustable: true },
-      { id: 'fri-press', name: 'Strict press', detail: '4 × 6', kind: 'main', meta: 'RPE 8', sets: [{ kg: 62.5, reps: 6 }, { kg: 62.5, reps: 6 }, { kg: 62.5, reps: 6 }, { kg: 62.5, reps: 6 }], adjustable: true },
-    ],
-  },
-  {
-    date: '2026-08-22',
-    week: 1,
-    title: 'CrossFit',
-    summary: 'Mixed-modal work with pacing discipline and clean mechanics.',
-    fuel: { kcal: 2900, proteinG: 200, carbEmphasis: 'High', fluidL: 3.6 },
-    items: [
-      { id: 'sat-metcon', name: 'Mixed modal piece', detail: 'Row · burpee · wall ball', kind: 'metcon', meta: '18 MIN', adjustable: false },
-      { id: 'sat-carry', name: 'Carry finisher', detail: 'Farmer carry steady', kind: 'engine', meta: '10 MIN', adjustable: false },
-    ],
-  },
-  {
-    date: '2026-08-23',
-    week: 1,
-    title: 'Off',
-    summary: 'Walk, tissue care, and readiness reset.',
-    fuel: { kcal: 2450, proteinG: 200, carbEmphasis: 'Moderate', fluidL: 3 },
-    items: [
-      { id: 'sun-walk', name: 'Walk', detail: 'Easy pace, no target', kind: 'engine', meta: '30 MIN', adjustable: false },
-      { id: 'sun-mobility', name: 'Mobility', detail: 'Hips, ankles, T-spine', kind: 'skill', meta: '12 MIN', adjustable: false },
+    id: 'upper-strength',
+    name: 'Upper Strength',
+    detail: 'Bench, press and upper back',
+    exercises: [
+      { id: 'bench-press', name: 'Bench Press', category: 'Bench', lift: 'bench', pctOfMax: 0.72, sets: 3, reps: 5, rpe: 8 },
+      { id: 'overhead-press', name: 'Overhead Press', category: 'Press', lift: 'press', pctOfMax: 0.73, sets: 3, reps: 5, rpe: 8 },
+      { id: 'barbell-row', name: 'Barbell Row', category: 'Pull', sets: 3, reps: 8, rpe: 8 },
+      { id: 'upper-accessories', name: 'Accessories', category: 'Accessory', sets: 3, reps: 12, rpe: 8 },
     ],
   },
 ]
 
 const defaultCheckin: Checkin = {
-  date: days[0].date,
-  sleep: 4,
-  soreness: 3,
+  date: new Date().toISOString().slice(0, 10),
   overall: 4,
+  sleep: 4,
+  soreness: 2,
+  sorenessArea: 'Legs',
   note: '',
 }
 
-const defaultState: AppState = {
-  checkins: { [days[0].date]: defaultCheckin },
-  sessions: [],
-  activeDate: days[0].date,
-  activeStartedAt: null,
+const defaultState: StoredState = {
+  profile,
+  maxes,
+  workouts,
+  checkin: defaultCheckin,
+  sessions: [
+    {
+      id: 'seed-session-1',
+      date: '2026-08-10T10:00:00.000Z',
+      workoutName: 'Lower Strength',
+      readiness: 82,
+      durationMin: 58,
+      prs: ['Back Squat top set'],
+      sets: [
+        { exerciseId: 'back-squat', index: 0, kg: 115, reps: 5, rpe: 8, at: '2026-08-10T10:20:00.000Z' },
+        { exerciseId: 'back-squat', index: 1, kg: 115, reps: 5, rpe: 8, at: '2026-08-10T10:24:00.000Z' },
+        { exerciseId: 'back-squat', index: 2, kg: 115, reps: 5, rpe: 8.5, at: '2026-08-10T10:28:00.000Z' },
+      ],
+    },
+    {
+      id: 'seed-session-2',
+      date: '2026-08-13T10:00:00.000Z',
+      workoutName: 'Upper Strength',
+      readiness: 67,
+      durationMin: 52,
+      prs: [],
+      sets: [
+        { exerciseId: 'bench-press', index: 0, kg: 72.5, reps: 5, rpe: 8, at: '2026-08-13T10:20:00.000Z' },
+        { exerciseId: 'bench-press', index: 1, kg: 72.5, reps: 5, rpe: 8.5, at: '2026-08-13T10:24:00.000Z' },
+      ],
+    },
+  ],
+  sync: { online: true, queued: 1 },
+  activeWorkoutId: 'lower-strength',
   activeSets: [],
+  activeStartedAt: null,
   restStartedAt: null,
-  queued: 0,
+  selectedLift: 'squat',
 }
 
-const sleepWords = ['Broken', 'Light', 'Fair', 'Solid', 'Deep']
-const sorenessWords = ['None', 'Mild', 'Moderate', 'High', 'Severe']
-const overallWords = ['Flat', 'Low', 'Fine', 'Good', 'Sharp']
+const readouts = {
+  overall: ['Flat', 'Low', 'Fine', 'Good', 'Sharp'],
+  sleep: ['Broken', 'Light', 'Fair', 'Solid', 'Deep'],
+  soreness: ['None', 'Mild', 'Moderate', 'High', 'Severe'],
+}
 
-function readState(): AppState {
+function readState(): StoredState {
   const saved = window.localStorage.getItem(storageKey)
 
-  if (!saved) {
-    return defaultState
-  }
+  if (!saved) return defaultState
 
   try {
-    const parsed = JSON.parse(saved) as Partial<AppState>
+    const parsed = JSON.parse(saved) as Partial<StoredState>
 
     return {
       ...defaultState,
       ...parsed,
-      checkins: { ...defaultState.checkins, ...parsed.checkins },
-      sessions: parsed.sessions ?? [],
+      profile: { ...defaultState.profile, ...parsed.profile },
+      maxes: { ...defaultState.maxes, ...parsed.maxes },
+      workouts: parsed.workouts?.length ? parsed.workouts : defaultState.workouts,
+      sync: { ...defaultState.sync, ...parsed.sync },
+      sessions: parsed.sessions ?? defaultState.sessions,
       activeSets: parsed.activeSets ?? [],
     }
   } catch {
@@ -271,8 +178,11 @@ function readState(): AppState {
 
 function readInitialTab(): Tab {
   const hash = window.location.hash.replace('#', '')
-
   return tabs.includes(hash as Tab) ? (hash as Tab) : 'today'
+}
+
+function scoreCheckin(checkin: Checkin) {
+  return Math.round(((checkin.overall + checkin.sleep + (6 - checkin.soreness)) / 15) * 100)
 }
 
 function roundTo2_5(value: number) {
@@ -280,109 +190,124 @@ function roundTo2_5(value: number) {
 }
 
 function formatKg(value: number | null | undefined) {
-  if (value === null || value === undefined) {
-    return '—'
-  }
-
+  if (value === null || value === undefined) return '—'
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
-function readinessScore(checkin: Checkin) {
-  return Math.min(100, Math.round(((checkin.sleep + checkin.overall + (6 - checkin.soreness)) / 15) * 100) + 5)
+function isLower(lift: Lift) {
+  return lift === 'squat' || lift === 'deadlift'
 }
 
-function adjustmentFor(score: number) {
-  if (score >= 75) {
-    return 0
-  }
-
-  if (score >= 60) {
-    return -0.04
-  }
-
-  return -0.08
+function sorenessMatches(checkin: Checkin, lift: Lift) {
+  const area = checkin.sorenessArea ?? 'Legs'
+  if (area === 'Full body') return true
+  if (area === 'Legs' || area === 'Back') return isLower(lift)
+  return !isLower(lift)
 }
 
-function adjustedKg(set: PlannedSet | undefined, item: PlannedItem, adjustment: number) {
-  if (!set || set.kg === null) {
-    return null
-  }
+function groupAdjustment(score: number, lift: Lift) {
+  const table = isLower(lift)
+    ? score >= 80 ? 0 : score >= 66 ? -4 : score >= 50 ? -7 : -12
+    : score >= 80 ? 0 : score >= 66 ? -2 : score >= 50 ? -4 : -8
 
-  return item.adjustable ? roundTo2_5(set.kg * (1 + adjustment)) : set.kg
+  return table
 }
 
-function dateLabel(date: string) {
-  const value = new Date(`${date}T12:00:00`)
+function targetFor(exercise: PlannedExercise, state: StoredState, score: number): TargetResult {
+  if (!exercise.lift || !exercise.pctOfMax) {
+    return { exercise, kg: null, adj: 0, basis: 'Accessories are left alone', factors: [] }
+  }
+
+  const baseAdj = groupAdjustment(score, exercise.lift)
+  const hasSoreness = sorenessMatches(state.checkin, exercise.lift)
+  const readinessFactor = baseAdj === 0 ? 0 : Math.trunc(baseAdj * 0.45)
+  const sleepFactor = baseAdj < 0 && state.checkin.sleep <= 3 ? -1 : 0
+  const sorenessFactor = hasSoreness ? baseAdj - readinessFactor - sleepFactor : 0
+  const adj = readinessFactor + sleepFactor + sorenessFactor
+  const planned = state.maxes[exercise.lift] * exercise.pctOfMax
+
+  return {
+    exercise,
+    kg: roundTo2_5(planned * (1 + adj / 100)),
+    adj,
+    basis: `${Math.round(exercise.pctOfMax * 100)}% of ${state.maxes[exercise.lift]} ${state.profile.units} max`,
+    factors: [
+      { label: 'Readiness', value: readinessFactor },
+      { label: 'Sleep', value: sleepFactor },
+      { label: 'Soreness', value: sorenessFactor },
+    ],
+  }
+}
+
+function dateLabel(date: string | Date = new Date()) {
+  const value = typeof date === 'string' ? new Date(date) : date
   const weekday = value.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()
   const day = value.toLocaleDateString('en-US', { day: '2-digit' })
   const month = value.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()
-
   return `${weekday} ${day} ${month}`
 }
 
-function sessionNote(session: Session) {
-  const squatSets = session.sets.filter((set) => set.itemId === 'mon-squat')
-  const top = squatSets[0]
-
-  if (!top) {
-    return session.note ?? 'Session completed. Landing quality logged.'
-  }
-
-  return `Squat ${formatKg(top.kg)} × ${top.reps} × ${squatSets.length}. Landing quality good.`
-}
-
 function App() {
-  const [state, setState] = useState<AppState>(() => readState())
+  const [state, setState] = useState<StoredState>(() => readState())
   const [tab, setTab] = useState<Tab>(() => readInitialTab())
   const [tick, setTick] = useState(() => Number(new Date()))
+  const [showWhy, setShowWhy] = useState(false)
   const [overrideKey, setOverrideKey] = useState<string | null>(null)
-  const day = days.find((item) => item.date === state.activeDate) ?? days[0]
-  const checkin = state.checkins[day.date] ?? { ...defaultCheckin, date: day.date }
-  const score = readinessScore(checkin)
-  const adjustment = adjustmentFor(score)
-  const mainItem = day.items.find((item) => item.adjustable && item.sets?.length) ?? day.items.find((item) => item.sets?.length)
-  const mainSet = mainItem?.sets?.[0]
-  const mainTarget = mainItem && mainSet ? adjustedKg(mainSet, mainItem, adjustment) : null
-  const loggedKeySet = new Set(state.activeSets.map((set) => `${set.itemId}:${set.index}`))
-  const setRows = day.items.flatMap((item) =>
-    (item.sets ?? []).map((set, index) => ({
-      item,
-      set,
+
+  const score = scoreCheckin(state.checkin)
+  const lowerWorkout = state.workouts[0]
+  const upperWorkout = state.workouts[1]
+  const activeWorkout = state.workouts.find((workout) => workout.id === state.activeWorkoutId) ?? lowerWorkout
+  const targetMap = useMemo(() => {
+    return new Map(
+      state.workouts
+        .flatMap((workout) => workout.exercises)
+        .map((exercise) => [exercise.id, targetFor(exercise, state, score)]),
+    )
+  }, [score, state])
+  const squatTarget = targetMap.get('back-squat')
+  const activeExercise = activeWorkout.exercises[0]
+  const activeTarget = targetMap.get(activeExercise.id)
+  const setRows = activeWorkout.exercises.flatMap((exercise) =>
+    Array.from({ length: exercise.sets }, (_, index) => ({
+      exercise,
       index,
-      key: `${item.id}:${index}`,
-      targetKg: adjustedKg(set, item, adjustment),
+      key: `${exercise.id}:${index}`,
+      target: targetMap.get(exercise.id),
     })),
   )
+  const loggedKeys = new Set(state.activeSets.map((set) => `${set.exerciseId}:${set.index}`))
   const doneCount = state.activeSets.length
-  const nextRow = setRows.find((row) => row.item.id === mainItem?.id && !loggedKeySet.has(row.key))
+  const nextRow = setRows.find((row) => row.exercise.id === activeExercise.id && !loggedKeys.has(row.key))
   const restRemaining = state.restStartedAt
     ? Math.max(0, restSeconds - Math.floor((tick - Number(new Date(state.restStartedAt))) / 1000))
     : 0
-  const verdict = adjustment === 0
+  const verdict = (squatTarget?.adj ?? 0) === 0
     ? {
         badge: 'PLAN HELD',
-        copy: 'Sleep and soreness are inside range. Run the block as written.',
+        sentence: 'Green day. Sleep and soreness are inside range — run the targets as written.',
       }
     : {
-        badge: `${Math.abs(Math.round(adjustment * 100))}% ADJUSTED`,
-        copy: `Targets pulled back ${Math.abs(Math.round(adjustment * 100))}%. Skill work and landing quality stay intact.`,
+        badge: `${squatTarget?.adj ?? 0}% ADJUSTED`,
+        sentence: 'Yellow day. Sleep and leg soreness are built into today\'s main lift targets.',
       }
-  const plannedSquat = [125, 127.5, 130, 132.5]
-  const actualSquat = state.sessions
-    .flatMap((session) => session.sets.filter((set) => set.itemId === 'mon-squat').slice(0, 1))
-    .map((set) => set.kg)
-  const maxProgressKg = Math.max(...plannedSquat, ...actualSquat, 1)
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(state))
   }, [state])
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setTick(Number(new Date()))
-    }, 1000)
+    const interval = window.setInterval(() => setTick(Number(new Date())), 1000)
+    const online = () => setState((current) => ({ ...current, sync: { ...current.sync, online: true } }))
+    const offline = () => setState((current) => ({ ...current, sync: { ...current.sync, online: false } }))
+    window.addEventListener('online', online)
+    window.addEventListener('offline', offline)
 
-    return () => window.clearInterval(interval)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('online', online)
+      window.removeEventListener('offline', offline)
+    }
   }, [])
 
   function selectTab(next: Tab) {
@@ -393,134 +318,138 @@ function App() {
   function patchCheckin(next: Partial<Checkin>) {
     setState((current) => ({
       ...current,
-      checkins: {
-        ...current.checkins,
-        [day.date]: { ...checkin, ...next, date: day.date },
-      },
-      queued: current.queued + 1,
+      checkin: { ...current.checkin, ...next, date: new Date().toISOString().slice(0, 10) },
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
   }
 
-  function beginSession() {
+  function startWorkout(workoutId = lowerWorkout.id) {
+    const now = new Date().toISOString()
     setState((current) => ({
       ...current,
-      activeDate: day.date,
-      activeStartedAt: current.activeStartedAt ?? new Date().toISOString(),
-      queued: current.queued + 1,
+      activeWorkoutId: workoutId,
+      activeStartedAt: current.activeStartedAt ?? now,
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
     selectTab('log')
   }
 
-  function logSet(row: { item: PlannedItem; set: PlannedSet; index: number; key: string; targetKg: number | null }) {
-    if (loggedKeySet.has(row.key) || row.targetKg === null) {
-      return
-    }
-
-    const targetKg = row.targetKg
-
-    if (targetKg === null) {
-      return
-    }
-
+  function logSet(row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) {
+    if (loggedKeys.has(row.key)) return
+    const kg = row.target?.kg ?? 0
     const now = new Date().toISOString()
+
     setState((current) => ({
       ...current,
       activeStartedAt: current.activeStartedAt ?? now,
       activeSets: [
         ...current.activeSets,
         {
-          itemId: row.item.id,
+          exerciseId: row.exercise.id,
           index: row.index,
-          kg: targetKg,
-          reps: row.set.reps,
-          rpe: row.set.rpeCap ?? null,
+          kg,
+          reps: row.exercise.reps,
+          rpe: row.exercise.rpe ?? null,
           at: now,
         },
       ],
       restStartedAt: now,
-      queued: current.queued + 1,
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
   }
 
-  function adjustLoggedSet(itemId: string, index: number, delta: number) {
+  function adjustSet(exerciseId: string, index: number, field: 'kg' | 'reps', delta: number) {
     setState((current) => ({
       ...current,
       activeSets: current.activeSets.map((set) =>
-        set.itemId === itemId && set.index === index
-          ? { ...set, kg: Math.max(0, roundTo2_5(set.kg + delta)) }
+        set.exerciseId === exerciseId && set.index === index
+          ? {
+              ...set,
+              [field]: field === 'kg' ? Math.max(0, roundTo2_5(set.kg + delta)) : Math.max(1, set.reps + delta),
+            }
           : set,
       ),
-      queued: current.queued + 1,
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
   }
 
-  function finishSession() {
+  function completeSession() {
     const finishedAt = new Date()
     const startedAt = state.activeStartedAt ? Number(new Date(state.activeStartedAt)) : Number(finishedAt)
     const session: Session = {
+      id: crypto.randomUUID(),
       date: finishedAt.toISOString(),
-      dayTitle: day.title,
+      workoutName: activeWorkout.name,
       readiness: score,
       sets: state.activeSets,
       durationMin: Math.max(1, Math.round((Number(finishedAt) - startedAt) / 60000)),
-      prs: [],
+      prs: state.activeSets.some((set) => set.exerciseId === 'back-squat') ? ['Back Squat top set'] : [],
     }
 
     setState((current) => ({
       ...current,
       sessions: [session, ...current.sessions],
-      activeStartedAt: null,
       activeSets: [],
+      activeStartedAt: null,
       restStartedAt: null,
-      queued: current.queued + 1,
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
     selectTab('history')
+  }
+
+  function syncNow() {
+    if (!state.sync.online) return
+    setState((current) => ({ ...current, sync: { ...current.sync, queued: 0 } }))
   }
 
   return (
     <main className="app">
       <section className="screen">
         {tab === 'today' && (
-          <TodayScreen
-            adjustment={adjustment}
-            beginSession={beginSession}
-            checkin={checkin}
-            day={day}
-            mainItem={mainItem}
-            mainTarget={mainTarget}
-            patchCheckin={patchCheckin}
+            <Today
+              lowerWorkout={lowerWorkout}
+              patchCheckin={patchCheckin}
+            profile={state.profile}
             score={score}
+            showWhy={showWhy}
+            squatTarget={squatTarget}
+            startWorkout={startWorkout}
+            state={state}
+            syncNow={syncNow}
+            targetMap={targetMap}
+            upperWorkout={upperWorkout}
             verdict={verdict}
+            setShowWhy={setShowWhy}
           />
         )}
-
         {tab === 'log' && (
-          <LogScreen
+          <Log
+            activeExercise={activeExercise}
             activeSets={state.activeSets}
-            adjustment={adjustment}
-            adjustLoggedSet={adjustLoggedSet}
-            day={day}
+            activeTarget={activeTarget}
+            activeWorkout={activeWorkout}
+            adjustSet={adjustSet}
+            completeSession={completeSession}
             doneCount={doneCount}
-            finishSession={finishSession}
             logSet={logSet}
-            loggedKeySet={loggedKeySet}
-            mainItem={mainItem}
+            loggedKeys={loggedKeys}
             nextKey={nextRow?.key}
             overrideKey={overrideKey}
             restRemaining={restRemaining}
             setOverrideKey={setOverrideKey}
             setRows={setRows}
-            totalSets={setRows.length}
           />
         )}
-
-        {tab === 'history' && <HistoryScreen sessions={state.sessions} />}
-
+        {tab === 'history' && <History queued={state.sync.queued} sessions={state.sessions} />}
         {tab === 'progress' && (
-          <ProgressScreen actualSquat={actualSquat} maxProgressKg={maxProgressKg} plannedSquat={plannedSquat} />
+          <Progress
+            selectedLift={state.selectedLift}
+            sessions={state.sessions}
+            setSelectedLift={(selectedLift) => setState((current) => ({ ...current, selectedLift }))}
+            target={squatTarget}
+          />
         )}
       </section>
-
       <nav className="tabbar" aria-label="Primary navigation">
         {tabs.map((item) => (
           <button className={tab === item ? 'active' : ''} key={item} onClick={() => selectTab(item)} type="button">
@@ -532,124 +461,115 @@ function App() {
   )
 }
 
-function TodayScreen({
-  adjustment,
-  beginSession,
-  checkin,
-  day,
-  mainItem,
-  mainTarget,
+function Today({
+  lowerWorkout,
   patchCheckin,
+  profile,
   score,
+  setShowWhy,
+  showWhy,
+  squatTarget,
+  startWorkout,
+  state,
+  syncNow,
+  targetMap,
+  upperWorkout,
   verdict,
 }: {
-  adjustment: number
-  beginSession: () => void
-  checkin: Checkin
-  day: PlannedDay
-  mainItem?: PlannedItem
-  mainTarget: number | null
+  lowerWorkout: Workout
   patchCheckin: (next: Partial<Checkin>) => void
+  profile: Profile
   score: number
-  verdict: { badge: string; copy: string }
+  setShowWhy: (value: boolean) => void
+  showWhy: boolean
+  squatTarget?: TargetResult
+  startWorkout: (workoutId?: string) => void
+  state: StoredState
+  syncNow: () => void
+  targetMap: Map<string, TargetResult>
+  upperWorkout: Workout
+  verdict: { badge: string; sentence: string }
 }) {
+  const mainTargets = state.workouts.flatMap((workout) => workout.exercises.filter((exercise) => exercise.lift))
+
   return (
     <>
       <div className="eyebrow-row">
-        <span>{block.name.split(' — ')[0]} · WEEK {day.week} · DAY 1</span>
-        <span>{dateLabel(day.date)}</span>
+        <span>{profile.name} · {profile.level}</span>
+        <span>{dateLabel()}</span>
       </div>
       <header className="day-head">
-        <h1>{day.title}</h1>
-        <p>{day.summary}</p>
+        <h1>Today&apos;s /<br />Training</h1>
+        <p>{verdict.sentence}</p>
       </header>
 
       <section className="target-band">
         <div>
           <p className="micro">Readiness</p>
-          <p className="readiness-number">
-            {score}<span>/100</span>
-          </p>
+          <p className="readiness-number">{score}<span>/100</span></p>
         </div>
         <div className="target-side">
-          <p className="micro">{mainItem?.name ?? 'Target'} · 5 × 5</p>
-          <p className="load-number">
-            {formatKg(mainTarget)} <span>kg</span>
-          </p>
-          <span className={adjustment === 0 ? 'badge sage' : 'badge amber'}>{verdict.badge}</span>
+          <p className="micro">Squat target</p>
+          <p className="load-number">{formatKg(squatTarget?.kg)} <span>{profile.units}</span></p>
+          <button className={(squatTarget?.adj ?? 0) === 0 ? 'badge sage' : 'badge amber'} onClick={() => setShowWhy(!showWhy)} type="button">
+            {verdict.badge}
+          </button>
         </div>
-        <p className="verdict">{verdict.copy}</p>
+        {showWhy && squatTarget && (
+          <div className="why-panel">
+            {squatTarget.factors.map((factor) => (
+              <span key={factor.label}>{factor.label} {factor.value}%</span>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="checkin">
-        <CheckinRow
-          label="Sleep"
-          value={checkin.sleep}
-          words={sleepWords}
-          onChange={(sleep) => patchCheckin({ sleep })}
-        />
-        <CheckinRow
-          label="Leg soreness"
-          value={checkin.soreness}
-          words={sorenessWords}
-          onChange={(soreness) => patchCheckin({ soreness })}
-        />
-        <CheckinRow
-          label="Overall"
-          value={checkin.overall}
-          words={overallWords}
-          onChange={(overall) => patchCheckin({ overall })}
-        />
+        <CheckinRow label="Overall" value={state.checkin.overall} words={readouts.overall} onChange={(overall) => patchCheckin({ overall })} />
+        <CheckinRow label="Sleep" value={state.checkin.sleep} words={readouts.sleep} onChange={(sleep) => patchCheckin({ sleep })} />
+        <CheckinRow label="Leg soreness" value={state.checkin.soreness} words={readouts.soreness} onChange={(soreness) => patchCheckin({ soreness })} />
       </section>
 
-      <section className="session-list">
-        <h2 className="section-label">Session</h2>
-        {day.items.map((item, index) => {
-          const firstSet = item.sets?.[0]
-          const meta = item.adjustable && firstSet
-            ? `${formatKg(adjustedKg(firstSet, item, adjustment))} KG`
-            : item.meta
-
+      <section className="targets-list">
+        <h2 className="section-label">Today&apos;s targets</h2>
+        {mainTargets.map((exercise) => {
+          const target = targetMap.get(exercise.id)
           return (
-            <div className="session-row" key={item.id}>
-              <span>{String(index + 1).padStart(2, '0')}</span>
+            <div className="target-row" key={exercise.id}>
               <div>
-                <strong>{item.name}</strong>
-                <p>{item.detail}</p>
+                <strong>{exercise.name}</strong>
+                <p>{target?.basis}</p>
               </div>
-              <em>{meta}</em>
+              <p>{formatKg(target?.kg)} <span>{profile.units}</span></p>
+              <em className={(target?.adj ?? 0) === 0 ? 'sage-text' : 'amber-text'}>{target?.adj === 0 ? 'held' : `${target?.adj}%`}</em>
             </div>
           )
         })}
+        <p className="footnote">Percentages come from your check-in, not from a mood. Accessories are left alone.</p>
       </section>
 
-      <section className="acl-note">
-        <p>ACL · RETURN TO SPORT</p>
-        <span>Do not progress through new pain, swelling, instability, or deteriorating mechanics. Landing quality outranks load.</span>
+      <section className="session-list">
+        <button className="session-choice today-choice" onClick={() => startWorkout(lowerWorkout.id)} type="button">
+          <span>{lowerWorkout.name}</span>
+          <p>{lowerWorkout.detail}</p>
+          <em>9 SETS</em>
+        </button>
+        <button className="session-choice" onClick={() => startWorkout(upperWorkout.id)} type="button">
+          <span>{upperWorkout.name}</span>
+          <p>{upperWorkout.detail}</p>
+          <em>TOMORROW</em>
+        </button>
       </section>
 
-      <section className="fuel-strip">
-        <div>
-          <p>Fuel</p>
-          <strong>{day.fuel.kcal.toLocaleString()}</strong>
-          <span>kcal</span>
-        </div>
-        <div>
-          <p>Protein</p>
-          <strong>{day.fuel.proteinG}</strong>
-          <span>grams</span>
-        </div>
-        <div>
-          <p>Carbs</p>
-          <strong>{day.fuel.carbEmphasis}</strong>
-          <span>squat day</span>
-        </div>
-      </section>
-
-      <button className="primary-button" onClick={beginSession} type="button">
-        <span>Begin session</span>
+      <button className="primary-button" onClick={() => startWorkout(lowerWorkout.id)} type="button">
+        <span>Start lower strength</span>
         <span>→</span>
       </button>
+
+      <div className="sync-line">
+        <span>● {state.sync.online ? 'ONLINE' : 'OFFLINE'} · {state.sync.queued} CHANGE WAITING</span>
+        <button onClick={syncNow} type="button">Sync</button>
+      </div>
     </>
   )
 }
@@ -682,56 +602,50 @@ function CheckinRow({
   )
 }
 
-function LogScreen({
+function Log({
+  activeExercise,
   activeSets,
-  adjustment,
-  adjustLoggedSet,
-  day,
+  activeTarget,
+  activeWorkout,
+  adjustSet,
+  completeSession,
   doneCount,
-  finishSession,
   logSet,
-  loggedKeySet,
-  mainItem,
+  loggedKeys,
   nextKey,
   overrideKey,
   restRemaining,
   setOverrideKey,
   setRows,
-  totalSets,
 }: {
+  activeExercise: PlannedExercise
   activeSets: LoggedSet[]
-  adjustment: number
-  adjustLoggedSet: (itemId: string, index: number, delta: number) => void
-  day: PlannedDay
+  activeTarget?: TargetResult
+  activeWorkout: Workout
+  adjustSet: (exerciseId: string, index: number, field: 'kg' | 'reps', delta: number) => void
+  completeSession: () => void
   doneCount: number
-  finishSession: () => void
-  logSet: (row: { item: PlannedItem; set: PlannedSet; index: number; key: string; targetKg: number | null }) => void
-  loggedKeySet: Set<string>
-  mainItem?: PlannedItem
+  logSet: (row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) => void
+  loggedKeys: Set<string>
   nextKey?: string
   overrideKey: string | null
   restRemaining: number
   setOverrideKey: (key: string | null) => void
-  setRows: Array<{ item: PlannedItem; set: PlannedSet; index: number; key: string; targetKg: number | null }>
-  totalSets: number
+  setRows: Array<{ exercise: PlannedExercise; index: number; key: string; target?: TargetResult }>
 }) {
-  const currentItem = mainItem ?? day.items[0]
-  const currentIndex = day.items.findIndex((item) => item.id === currentItem.id)
-  const remainingItems = day.items.slice(Math.max(0, currentIndex + 1))
-  const currentRows = setRows.filter((row) => row.item.id === currentItem.id)
+  const currentRows = setRows.filter((row) => row.exercise.id === activeExercise.id)
+  const remainingExercises = activeWorkout.exercises.slice(1)
 
   return (
     <>
       <div className="eyebrow-row">
-        <span>ACTIVE · SET {doneCount}/{totalSets}</span>
+        <span>ACTIVE · {doneCount}/9 SETS</span>
         <span className={restRemaining > 0 ? 'rest-live' : ''}>REST {Math.floor(restRemaining / 60)}:{String(restRemaining % 60).padStart(2, '0')}</span>
       </div>
       <header className="day-head compact">
-        <h1>{currentItem.name}</h1>
-        <p className="mono-line">
-          TARGET {formatKg(setRows.find((row) => row.item.id === currentItem.id)?.targetKg)} KG · RPE 8 CAP
-        </p>
-        <p>{currentItem.detail}</p>
+        <h1>{activeExercise.name}</h1>
+        <p className="mono-line">{activeWorkout.name} · TARGET {formatKg(activeTarget?.kg)} KG</p>
+        <p>{activeTarget?.adj === 0 ? 'Plan held. Load is written as prescribed.' : `${activeTarget?.adj}% from readiness · sleep and leg soreness are in the number.`}</p>
       </header>
 
       <section className="set-table">
@@ -743,138 +657,125 @@ function LogScreen({
           <span>RPE</span>
         </div>
         {currentRows.map((row) => {
-          const logged = activeSets.find((set) => set.itemId === row.item.id && set.index === row.index)
+          const logged = activeSets.find((set) => set.exerciseId === row.exercise.id && set.index === row.index)
           const isLogged = Boolean(logged)
           const isNext = row.key === nextKey
 
           return (
             <div className={`set-row ${isLogged ? 'logged' : ''} ${isNext ? 'next' : ''}`} key={row.key}>
               <button onClick={() => logSet(row)} type="button">{row.index + 1}</button>
-              <span>{isLogged ? 'logged' : isNext ? 'up next' : 'pending'}</span>
-              <button className="cell-button" onClick={() => setOverrideKey(overrideKey === row.key ? null : row.key)} type="button">
-                {formatKg(logged?.kg ?? row.targetKg)}
-              </button>
-              <button className="cell-button" onClick={() => logSet(row)} type="button">{logged?.reps ?? row.set.reps}</button>
-              <button className="cell-button" onClick={() => logSet(row)} type="button">{logged?.rpe ?? '—'}</button>
+              <button onClick={() => logSet(row)} type="button">{isLogged ? 'logged' : isNext ? 'up next' : 'pending'}</button>
+              <button onClick={() => setOverrideKey(overrideKey === row.key ? null : row.key)} type="button">{formatKg(logged?.kg ?? row.target?.kg)}</button>
+              <button onClick={() => setOverrideKey(overrideKey === row.key ? null : row.key)} type="button">{logged?.reps ?? row.exercise.reps}</button>
+              <button onClick={() => logSet(row)} type="button">{logged?.rpe ?? '—'}</button>
               {overrideKey === row.key && logged && (
                 <div className="stepper">
-                  <button onClick={() => adjustLoggedSet(row.item.id, row.index, -2.5)} type="button">−2.5</button>
-                  <span>{formatKg(logged.kg)} KG</span>
-                  <button onClick={() => adjustLoggedSet(row.item.id, row.index, 2.5)} type="button">+2.5</button>
+                  <button onClick={() => adjustSet(row.exercise.id, row.index, 'kg', -2.5)} type="button">−2.5</button>
+                  <span>{formatKg(logged.kg)} KG · {logged.reps} REPS</span>
+                  <button onClick={() => adjustSet(row.exercise.id, row.index, 'kg', 2.5)} type="button">+2.5</button>
+                  <button onClick={() => adjustSet(row.exercise.id, row.index, 'reps', -1)} type="button">−1 REP</button>
+                  <button onClick={() => adjustSet(row.exercise.id, row.index, 'reps', 1)} type="button">+1 REP</button>
                 </div>
               )}
             </div>
           )
         })}
       </section>
+      <p className="helper">Tap a set to log it. Rest starts on its own.</p>
 
       <section className="then-list">
         <h2 className="section-label">Then</h2>
-        {remainingItems.map((item) => (
-          <div className="then-row" key={item.id}>
-            <span>{item.name}</span>
-            <em>{item.adjustable ? `${Math.abs(Math.round(adjustment * 100))}% scaled` : item.meta}</em>
+        {remainingExercises.map((exercise) => (
+          <div className="then-row" key={exercise.id}>
+            <div>
+              <span>{exercise.name}</span>
+              <small>{exercise.category}</small>
+            </div>
+            <em>{exercise.sets} × {exercise.reps}{exercise.lift ? ` · ${formatKg(activeTarget?.kg)} KG` : ''}</em>
           </div>
         ))}
       </section>
-
-      <button className="secondary-button" disabled={!loggedKeySet.size} onClick={finishSession} type="button">
-        Finish session
-      </button>
+      <div className="actions">
+        <button className="secondary-button" disabled={!loggedKeys.size} onClick={completeSession} type="button">Complete</button>
+        <button className="secondary-button" type="button">Add set</button>
+      </div>
     </>
   )
 }
 
-function HistoryScreen({ sessions }: { sessions: Session[] }) {
-  const weekSessions = sessions.length
-  const tonnage = sessions.reduce(
-    (total, session) => total + session.sets.reduce((setTotal, set) => setTotal + set.kg * set.reps, 0),
-    0,
-  )
+function History({ queued, sessions }: { queued: number; sessions: Session[] }) {
+  const volume = sessions.reduce((total, session) => total + session.sets.reduce((setTotal, set) => setTotal + set.kg * set.reps, 0), 0)
 
   return (
     <>
-      <div className="eyebrow-row">
-        <span>{block.name.split(' — ')[0]} · {block.weeks} WEEKS</span>
-        <span>{sessions.length ? 'LOGGED' : 'EMPTY'}</span>
-      </div>
-      <header className="day-head compact">
-        <h1>History</h1>
-      </header>
-      <section className="history-stats">
-        <div>
-          <span>Sessions · week</span>
-          <strong>{weekSessions}</strong>
-        </div>
-        <div>
-          <span>Tonnage</span>
-          <strong>{Math.round(tonnage).toLocaleString()} KG</strong>
-        </div>
+      <div className="eyebrow-row"><span>LAST 30 DAYS</span><span>{dateLabel()}</span></div>
+      <header className="day-head compact"><h1>History</h1></header>
+      <section className="history-stats three">
+        <div><span>Sessions</span><strong>{sessions.length}</strong></div>
+        <div><span>Volume</span><strong>{Math.round(volume).toLocaleString()} KG</strong></div>
+        <div><span>Queued</span><strong>{queued}</strong></div>
       </section>
       <section className="history-list">
-        {sessions.length ? sessions.map((session) => (
-          <article className="history-row" key={session.date}>
-            <strong className={session.readiness >= 70 ? 'sage-text' : 'amber-text'}>{session.readiness}</strong>
-            <div>
+        {sessions.length ? sessions.map((session) => {
+          const top = session.sets[0]
+          return (
+            <article className="history-row" key={session.id}>
+              <strong className={session.readiness >= 70 ? 'sage-text' : 'amber-text'}>{session.readiness}</strong>
               <div>
-                <h2>{session.dayTitle}</h2>
-                <time>{dateLabel(session.date.slice(0, 10))}</time>
+                <div><h2>{session.workoutName}</h2><time>{dateLabel(session.date)}</time></div>
+                <p>{session.durationMin} min · 4 exercises · full load</p>
+                <em>{top ? `${top.exerciseId.replace('-', ' ').toUpperCase()} ${formatKg(top.kg)} × ${top.reps} · ${session.prs[0] ?? 'TOP SET'}` : 'NO SETS'}</em>
               </div>
-              <p>{sessionNote(session)}</p>
-            </div>
-          </article>
-        )) : <p className="empty">Finished sessions appear here.</p>}
+            </article>
+          )
+        }) : <p className="empty">Finished sessions appear here.</p>}
       </section>
     </>
   )
 }
 
-function ProgressScreen({
-  actualSquat,
-  maxProgressKg,
-  plannedSquat,
+function Progress({
+  selectedLift,
+  sessions,
+  setSelectedLift,
+  target,
 }: {
-  actualSquat: number[]
-  maxProgressKg: number
-  plannedSquat: number[]
+  selectedLift: Lift
+  sessions: Session[]
+  setSelectedLift: (lift: Lift) => void
+  target?: TargetResult
 }) {
+  const rows = sessions
+    .flatMap((session) => session.sets.filter((set) => set.exerciseId === 'back-squat').slice(0, 1).map((set) => ({ date: session.date, kg: set.kg, label: 'TOP SET', current: true })))
+  const targetRow = { date: new Date().toISOString(), kg: target?.kg ?? 0, label: 'TODAY', current: false }
+  const allRows = [targetRow, ...rows]
+  const max = Math.max(...allRows.map((row) => row.kg), 1)
+
   return (
     <>
-      <div className="eyebrow-row">
-        <span>TOP SET · BACK SQUAT</span>
-        <span>{block.name.split(' — ')[0]}</span>
+      <div className="eyebrow-row"><span>TOP SET · BACK SQUAT</span><span /></div>
+      <div className="lift-switch">
+        {(['squat', 'bench', 'deadlift', 'press'] as Lift[]).map((lift) => (
+          <button className={selectedLift === lift ? 'active' : ''} key={lift} onClick={() => setSelectedLift(lift)} type="button">{lift}</button>
+        ))}
       </div>
       <header className="day-head compact">
         <h1>Progress</h1>
-        <p>Four weeks of Block 1. The line is the plan; the bars are what happened.</p>
+        <p>Six weeks of logged top sets. No trophies, no streaks — just the number going up.</p>
       </header>
       <section className="progress-list">
-        {plannedSquat.map((kg, index) => {
-          const actual = actualSquat[index]
-          const displayKg = actual ?? kg
-          const future = actual === undefined
-
-          return (
-            <div className="progress-row" key={kg}>
-              <div>
-                <span>Week {index + 1}</span>
-                <em>5 × 5</em>
-              </div>
-              <div className="bar-track">
-                <i className={future ? 'future' : ''} style={{ width: `${(displayKg / maxProgressKg) * 100}%` }} />
-              </div>
-              <strong>{formatKg(displayKg)}</strong>
-            </div>
-          )
-        })}
+        {allRows.map((row, index) => (
+          <div className="progress-row" key={`${row.date}-${index}`}>
+            <div><span>{dateLabel(row.date)}</span><em>{row.label}</em></div>
+            <div className="bar-track"><i className={index > 2 ? 'old' : !row.current ? 'future' : ''} style={{ width: `${(row.kg / max) * 100}%` }} /></div>
+            <strong>{formatKg(row.kg)}</strong>
+          </div>
+        ))}
       </section>
       <section className="also-moving">
-        <h2 className="section-label">Also moving</h2>
-        <div><span>Clean & jerk</span><strong>+4 KG</strong></div>
-        <div><span>Snatch</span><strong>+2.5 KG</strong></div>
-        <div><span>Ring muscle-up</span><strong>2 SINGLES</strong></div>
-        <div><span>Handstand walk</span><strong>18 M</strong></div>
-        <div><span>Bodyweight (7-day)</span><strong>94.6 KG</strong></div>
+        <h2 className="section-label">Recent PRs</h2>
+        <div><span>Back Squat</span><strong>115 × 5</strong></div>
+        <div><span>Bench Press</span><strong>72.5 × 5</strong></div>
       </section>
     </>
   )
