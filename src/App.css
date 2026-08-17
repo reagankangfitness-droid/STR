@@ -14,8 +14,7 @@
   --primary: #2563eb;
   --primary-soft: #eff6ff;
   --success: #12805c;
-  --warning: #b45309;
-  --danger: #c2410c;
+  --success-soft: #ecfdf3;
   --shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 
@@ -153,7 +152,7 @@ button {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--danger);
+  background: #98a2b3;
 }
 
 .status-dot.online {
@@ -437,9 +436,9 @@ textarea {
 .reason-list li,
 .pr-list li {
   padding: 9px 10px;
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--success);
   border-radius: 0 8px 8px 0;
-  background: #fffbeb;
+  background: var(--success-soft);
   color: #374151;
   font-weight: 760;
 }

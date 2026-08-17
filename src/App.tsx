@@ -104,8 +104,8 @@ const sorenessLabels: Record<SorenessArea, string> = {
 
 const statusTone: Record<ReadinessStatus, string> = {
   green: '#12805c',
-  yellow: '#b45309',
-  red: '#c2410c',
+  yellow: '#475467',
+  red: '#475467',
 }
 
 const exercises: Exercise[] = [
