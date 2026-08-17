@@ -103,9 +103,9 @@ const sorenessLabels: Record<SorenessArea, string> = {
 }
 
 const statusTone: Record<ReadinessStatus, string> = {
-  green: '#237a57',
-  yellow: '#b7791f',
-  red: '#c2413b',
+  green: '#12805c',
+  yellow: '#b45309',
+  red: '#c2410c',
 }
 
 const exercises: Exercise[] = [
@@ -625,8 +625,8 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">MVP prototype</p>
-            <h1>Fast strength logging with recovery-aware targets</h1>
+            <p className="eyebrow">StrengthBoard</p>
+            <h1>Today&apos;s Training</h1>
           </div>
           <div className="profile-pill">
             <span>{storedState.profile.name}</span>
