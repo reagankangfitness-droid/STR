@@ -43,6 +43,7 @@ type Session = {
 }
 
 type SyncState = { online: boolean; queued: number }
+type SetOverride = { kg: number; reps: number }
 
 type StoredState = {
   profile: Profile
@@ -53,9 +54,11 @@ type StoredState = {
   sync: SyncState
   activeWorkoutId: string
   activeSets: LoggedSet[]
+  activeExtraSets: Record<string, number>
   activeStartedAt: string | null
   restStartedAt: string | null
   selectedLift: Lift
+  setOverrides: Record<string, SetOverride>
 }
 
 type TargetResult = {
@@ -142,9 +145,11 @@ const defaultState: StoredState = {
   sync: { online: true, queued: 1 },
   activeWorkoutId: 'lower-strength',
   activeSets: [],
+  activeExtraSets: {},
   activeStartedAt: null,
   restStartedAt: null,
   selectedLift: 'squat',
+  setOverrides: {},
 }
 
 const readouts = {
@@ -170,6 +175,8 @@ function readState(): StoredState {
       sync: { ...defaultState.sync, ...parsed.sync },
       sessions: parsed.sessions ?? defaultState.sessions,
       activeSets: parsed.activeSets ?? [],
+      activeExtraSets: parsed.activeExtraSets ?? {},
+      setOverrides: parsed.setOverrides ?? {},
     }
   } catch {
     return defaultState
@@ -266,10 +273,8 @@ function App() {
     )
   }, [score, state])
   const squatTarget = targetMap.get('back-squat')
-  const activeExercise = activeWorkout.exercises[0]
-  const activeTarget = targetMap.get(activeExercise.id)
   const setRows = activeWorkout.exercises.flatMap((exercise) =>
-    Array.from({ length: exercise.sets }, (_, index) => ({
+    Array.from({ length: exercise.sets + (state.activeExtraSets[exercise.id] ?? 0) }, (_, index) => ({
       exercise,
       index,
       key: `${exercise.id}:${index}`,
@@ -277,8 +282,16 @@ function App() {
     })),
   )
   const loggedKeys = new Set(state.activeSets.map((set) => `${set.exerciseId}:${set.index}`))
+  const activeExercise = activeWorkout.exercises.find((exercise) =>
+    setRows.some((row) => row.exercise.id === exercise.id && !loggedKeys.has(row.key)),
+  ) ?? activeWorkout.exercises[0]
+  const activeTarget = targetMap.get(activeExercise.id)
   const doneCount = state.activeSets.length
-  const nextRow = setRows.find((row) => row.exercise.id === activeExercise.id && !loggedKeys.has(row.key))
+  const totalSetCount = setRows.length
+  const nextRow = setRows.find((row) => !loggedKeys.has(row.key))
+  const selectedTarget = state.workouts
+    .flatMap((workout) => workout.exercises)
+    .find((exercise) => exercise.lift === state.selectedLift)
   const restRemaining = state.restStartedAt
     ? Math.max(0, restSeconds - Math.floor((tick - Number(new Date(state.restStartedAt))) / 1000))
     : 0
@@ -328,7 +341,11 @@ function App() {
     setState((current) => ({
       ...current,
       activeWorkoutId: workoutId,
-      activeStartedAt: current.activeStartedAt ?? now,
+      activeSets: [],
+      activeExtraSets: {},
+      activeStartedAt: now,
+      restStartedAt: null,
+      setOverrides: {},
       sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
     selectTab('log')
@@ -336,7 +353,9 @@ function App() {
 
   function logSet(row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) {
     if (loggedKeys.has(row.key)) return
-    const kg = row.target?.kg ?? 0
+    const override = state.setOverrides[row.key]
+    const kg = override?.kg ?? row.target?.kg ?? 0
+    const reps = override?.reps ?? row.exercise.reps
     const now = new Date().toISOString()
 
     setState((current) => ({
@@ -348,7 +367,7 @@ function App() {
           exerciseId: row.exercise.id,
           index: row.index,
           kg,
-          reps: row.exercise.reps,
+          reps,
           rpe: row.exercise.rpe ?? null,
           at: now,
         },
@@ -358,7 +377,27 @@ function App() {
     }))
   }
 
+  function toggleOverride(row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) {
+    setOverrideKey(overrideKey === row.key ? null : row.key)
+    setState((current) => {
+      if (current.setOverrides[row.key]) return current
+      const logged = current.activeSets.find((set) => set.exerciseId === row.exercise.id && set.index === row.index)
+
+      return {
+        ...current,
+        setOverrides: {
+          ...current.setOverrides,
+          [row.key]: {
+            kg: logged?.kg ?? row.target?.kg ?? 0,
+            reps: logged?.reps ?? row.exercise.reps,
+          },
+        },
+      }
+    })
+  }
+
   function adjustSet(exerciseId: string, index: number, field: 'kg' | 'reps', delta: number) {
+    const key = `${exerciseId}:${index}`
     setState((current) => ({
       ...current,
       activeSets: current.activeSets.map((set) =>
@@ -369,6 +408,28 @@ function App() {
             }
           : set,
       ),
+      setOverrides: {
+        ...current.setOverrides,
+        [key]: {
+          kg: field === 'kg'
+            ? Math.max(0, roundTo2_5((current.setOverrides[key]?.kg ?? current.activeSets.find((set) => set.exerciseId === exerciseId && set.index === index)?.kg ?? 0) + delta))
+            : (current.setOverrides[key]?.kg ?? current.activeSets.find((set) => set.exerciseId === exerciseId && set.index === index)?.kg ?? 0),
+          reps: field === 'reps'
+            ? Math.max(1, (current.setOverrides[key]?.reps ?? current.activeSets.find((set) => set.exerciseId === exerciseId && set.index === index)?.reps ?? 1) + delta)
+            : (current.setOverrides[key]?.reps ?? current.activeSets.find((set) => set.exerciseId === exerciseId && set.index === index)?.reps ?? 1),
+        },
+      },
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function addSet() {
+    setState((current) => ({
+      ...current,
+      activeExtraSets: {
+        ...current.activeExtraSets,
+        [activeExercise.id]: (current.activeExtraSets[activeExercise.id] ?? 0) + 1,
+      },
       sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
   }
@@ -390,8 +451,10 @@ function App() {
       ...current,
       sessions: [session, ...current.sessions],
       activeSets: [],
+      activeExtraSets: {},
       activeStartedAt: null,
       restStartedAt: null,
+      setOverrides: {},
       sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
     selectTab('history')
@@ -429,6 +492,7 @@ function App() {
             activeTarget={activeTarget}
             activeWorkout={activeWorkout}
             adjustSet={adjustSet}
+            addSet={addSet}
             completeSession={completeSession}
             doneCount={doneCount}
             logSet={logSet}
@@ -436,8 +500,11 @@ function App() {
             nextKey={nextRow?.key}
             overrideKey={overrideKey}
             restRemaining={restRemaining}
-            setOverrideKey={setOverrideKey}
+            setOverrides={state.setOverrides}
             setRows={setRows}
+            targetMap={targetMap}
+            toggleOverride={toggleOverride}
+            totalSetCount={totalSetCount}
           />
         )}
         {tab === 'history' && <History queued={state.sync.queued} sessions={state.sessions} />}
@@ -446,7 +513,7 @@ function App() {
             selectedLift={state.selectedLift}
             sessions={state.sessions}
             setSelectedLift={(selectedLift) => setState((current) => ({ ...current, selectedLift }))}
-            target={squatTarget}
+            target={selectedTarget ? targetMap.get(selectedTarget.id) : undefined}
           />
         )}
       </section>
@@ -608,6 +675,7 @@ function Log({
   activeTarget,
   activeWorkout,
   adjustSet,
+  addSet,
   completeSession,
   doneCount,
   logSet,
@@ -615,14 +683,18 @@ function Log({
   nextKey,
   overrideKey,
   restRemaining,
-  setOverrideKey,
+  setOverrides,
   setRows,
+  targetMap,
+  toggleOverride,
+  totalSetCount,
 }: {
   activeExercise: PlannedExercise
   activeSets: LoggedSet[]
   activeTarget?: TargetResult
   activeWorkout: Workout
   adjustSet: (exerciseId: string, index: number, field: 'kg' | 'reps', delta: number) => void
+  addSet: () => void
   completeSession: () => void
   doneCount: number
   logSet: (row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) => void
@@ -630,16 +702,20 @@ function Log({
   nextKey?: string
   overrideKey: string | null
   restRemaining: number
-  setOverrideKey: (key: string | null) => void
+  setOverrides: Record<string, SetOverride>
   setRows: Array<{ exercise: PlannedExercise; index: number; key: string; target?: TargetResult }>
+  targetMap: Map<string, TargetResult>
+  toggleOverride: (row: { exercise: PlannedExercise; index: number; key: string; target?: TargetResult }) => void
+  totalSetCount: number
 }) {
   const currentRows = setRows.filter((row) => row.exercise.id === activeExercise.id)
-  const remainingExercises = activeWorkout.exercises.slice(1)
+  const activeIndex = activeWorkout.exercises.findIndex((exercise) => exercise.id === activeExercise.id)
+  const remainingExercises = activeWorkout.exercises.slice(activeIndex + 1)
 
   return (
     <>
       <div className="eyebrow-row">
-        <span>ACTIVE · {doneCount}/9 SETS</span>
+        <span>ACTIVE · {doneCount}/{totalSetCount} SETS</span>
         <span className={restRemaining > 0 ? 'rest-live' : ''}>REST {Math.floor(restRemaining / 60)}:{String(restRemaining % 60).padStart(2, '0')}</span>
       </div>
       <header className="day-head compact">
@@ -658,20 +734,23 @@ function Log({
         </div>
         {currentRows.map((row) => {
           const logged = activeSets.find((set) => set.exerciseId === row.exercise.id && set.index === row.index)
+          const override = setOverrides[row.key]
           const isLogged = Boolean(logged)
           const isNext = row.key === nextKey
+          const displayKg = override?.kg ?? logged?.kg ?? row.target?.kg
+          const displayReps = override?.reps ?? logged?.reps ?? row.exercise.reps
 
           return (
             <div className={`set-row ${isLogged ? 'logged' : ''} ${isNext ? 'next' : ''}`} key={row.key}>
               <button onClick={() => logSet(row)} type="button">{row.index + 1}</button>
               <button onClick={() => logSet(row)} type="button">{isLogged ? 'logged' : isNext ? 'up next' : 'pending'}</button>
-              <button onClick={() => setOverrideKey(overrideKey === row.key ? null : row.key)} type="button">{formatKg(logged?.kg ?? row.target?.kg)}</button>
-              <button onClick={() => setOverrideKey(overrideKey === row.key ? null : row.key)} type="button">{logged?.reps ?? row.exercise.reps}</button>
+              <button onClick={() => toggleOverride(row)} type="button">{formatKg(displayKg)}</button>
+              <button onClick={() => toggleOverride(row)} type="button">{displayReps}</button>
               <button onClick={() => logSet(row)} type="button">{logged?.rpe ?? '—'}</button>
-              {overrideKey === row.key && logged && (
+              {overrideKey === row.key && (
                 <div className="stepper">
+                  <span>{formatKg(displayKg)} KG · {displayReps} REPS</span>
                   <button onClick={() => adjustSet(row.exercise.id, row.index, 'kg', -2.5)} type="button">−2.5</button>
-                  <span>{formatKg(logged.kg)} KG · {logged.reps} REPS</span>
                   <button onClick={() => adjustSet(row.exercise.id, row.index, 'kg', 2.5)} type="button">+2.5</button>
                   <button onClick={() => adjustSet(row.exercise.id, row.index, 'reps', -1)} type="button">−1 REP</button>
                   <button onClick={() => adjustSet(row.exercise.id, row.index, 'reps', 1)} type="button">+1 REP</button>
@@ -691,13 +770,13 @@ function Log({
               <span>{exercise.name}</span>
               <small>{exercise.category}</small>
             </div>
-            <em>{exercise.sets} × {exercise.reps}{exercise.lift ? ` · ${formatKg(activeTarget?.kg)} KG` : ''}</em>
+            <em>{exercise.sets} × {exercise.reps}{exercise.lift ? ` · ${formatKg(targetMap.get(exercise.id)?.kg)} KG` : ''}</em>
           </div>
         ))}
       </section>
       <div className="actions">
         <button className="secondary-button" disabled={!loggedKeys.size} onClick={completeSession} type="button">Complete</button>
-        <button className="secondary-button" type="button">Add set</button>
+        <button className="secondary-button" onClick={addSet} type="button">Add set</button>
       </div>
     </>
   )
@@ -745,15 +824,28 @@ function Progress({
   setSelectedLift: (lift: Lift) => void
   target?: TargetResult
 }) {
+  const liftNames: Record<Lift, string> = {
+    squat: 'Back Squat',
+    bench: 'Bench Press',
+    deadlift: 'Deadlift',
+    press: 'Overhead Press',
+  }
+  const liftExerciseIds: Record<Lift, string> = {
+    squat: 'back-squat',
+    bench: 'bench-press',
+    deadlift: 'deadlift',
+    press: 'overhead-press',
+  }
+  const exerciseId = target?.exercise.id ?? liftExerciseIds[selectedLift]
   const rows = sessions
-    .flatMap((session) => session.sets.filter((set) => set.exerciseId === 'back-squat').slice(0, 1).map((set) => ({ date: session.date, kg: set.kg, label: 'TOP SET', current: true })))
+    .flatMap((session) => session.sets.filter((set) => set.exerciseId === exerciseId).slice(0, 1).map((set) => ({ date: session.date, kg: set.kg, label: 'TOP SET', current: true })))
   const targetRow = { date: new Date().toISOString(), kg: target?.kg ?? 0, label: 'TODAY', current: false }
   const allRows = [targetRow, ...rows]
   const max = Math.max(...allRows.map((row) => row.kg), 1)
 
   return (
     <>
-      <div className="eyebrow-row"><span>TOP SET · BACK SQUAT</span><span /></div>
+      <div className="eyebrow-row"><span>TOP SET · {liftNames[selectedLift].toUpperCase()}</span><span /></div>
       <div className="lift-switch">
         {(['squat', 'bench', 'deadlift', 'press'] as Lift[]).map((lift) => (
           <button className={selectedLift === lift ? 'active' : ''} key={lift} onClick={() => setSelectedLift(lift)} type="button">{lift}</button>
