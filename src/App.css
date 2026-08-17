@@ -249,6 +249,7 @@ h2 {
 }
 
 .readiness-band,
+.command-center,
 .panel,
 .exercise-block,
 .session-row,
@@ -257,6 +258,105 @@ h2 {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: var(--shadow);
+}
+
+.command-center {
+  display: grid;
+  gap: 18px;
+  align-items: stretch;
+  padding: 18px;
+}
+
+.command-copy {
+  display: grid;
+  align-content: center;
+}
+
+.command-copy h2 {
+  max-width: 680px;
+  font-size: clamp(1.55rem, 4vw, 2.45rem);
+  line-height: 1.02;
+}
+
+.command-copy p {
+  max-width: 640px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+.command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.compact-action {
+  margin: 0;
+  padding: 0 14px;
+}
+
+.command-metrics {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.hero-target {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.target-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.target-strip button {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  min-height: 86px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow);
+}
+
+.target-strip button.is-active {
+  border-color: #bfdbfe;
+  background: var(--primary-soft);
+}
+
+.target-strip span,
+.target-strip small,
+.sidecar-metrics span,
+.mobile-workout-bar span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.target-strip strong {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.target-strip small {
+  color: var(--success);
 }
 
 .readiness-band {
@@ -504,8 +604,11 @@ textarea {
 
 .workout-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 11;
 }
 
 .workout-header input {
@@ -529,6 +632,38 @@ textarea {
 .exercise-list {
   display: grid;
   gap: 12px;
+}
+
+.log-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.log-sidecar {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.sidecar-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.sidecar-metrics div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.sidecar-metrics strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.25rem;
 }
 
 .exercise-block {
@@ -623,6 +758,10 @@ textarea {
 .secondary-action {
   margin: 10px 14px 14px;
   padding: 0 12px;
+}
+
+.mobile-workout-bar {
+  display: none;
 }
 
 .library-grid {
@@ -807,6 +946,14 @@ textarea {
   .routine-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .command-center {
+    grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.65fr);
+  }
+
+  .command-metrics {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
 }
 
 @media (min-width: 1160px) {
@@ -821,14 +968,41 @@ textarea {
   .routine-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .log-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+  }
+
+  .log-sidecar {
+    position: sticky;
+    top: 104px;
+  }
 }
 
 @media (max-width: 640px) {
+  .app-shell {
+    padding-bottom: 78px;
+  }
+
   .sidebar {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
     grid-template-columns: 1fr;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
+    box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.08);
   }
 
   .brand-block {
+    display: none;
+  }
+
+  .sync-panel {
     display: none;
   }
 
@@ -859,8 +1033,71 @@ textarea {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .workout-header {
+  .command-center {
+    padding: 16px;
+  }
+
+  .command-actions {
+    display: grid;
+  }
+
+  .command-actions .primary-action,
+  .command-actions .compact-action {
+    width: 100%;
+    margin: 0;
+  }
+
+  .command-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .score-box {
+    min-height: 70px;
+  }
+
+  .target-strip {
+    display: flex;
+    margin-inline: -16px;
+    padding: 0 16px 4px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+
+  .target-strip button {
+    flex: 0 0 172px;
+    scroll-snap-align: start;
+  }
+
+  .workout-header {
+    grid-template-columns: 1fr auto auto;
+    margin-inline: -16px;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .workout-header .primary-action {
+    display: none;
+  }
+
+  .workout-header input {
+    font-size: 1.18rem;
+  }
+
+  .timer-box {
+    min-width: 72px;
+    min-height: 58px;
+  }
+
+  .sets-row {
+    grid-template-columns: 48px minmax(72px, 1fr) minmax(72px, 0.86fr) minmax(72px, 0.86fr);
+    min-width: 0;
+  }
+
+  .sets-head span:nth-child(5),
+  .sets-row input:last-child {
+    display: none;
   }
 
   .summary-strip,
@@ -881,5 +1118,52 @@ textarea {
   .segmented,
   .segmented.compact {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .is-logging {
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .is-logging .sidebar,
+  .is-logging .topbar {
+    display: none;
+  }
+
+  .is-logging .workspace {
+    padding-top: 0;
+  }
+
+  .log-sidecar .panel:first-child {
+    display: none;
+  }
+
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mobile-workout-bar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 -14px 32px rgba(15, 23, 42, 0.1);
+  }
+
+  .mobile-workout-bar strong {
+    display: block;
+    margin-top: 3px;
+  }
+
+  .mobile-workout-bar .primary-action {
+    min-height: 44px;
   }
 }

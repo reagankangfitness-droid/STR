@@ -213,6 +213,7 @@ const defaultState: StoredState = {
 }
 
 const storageKey = 'strength-log:mvp'
+const tabs: Tab[] = ['today', 'log', 'history', 'progress']
 
 function readStoredState(): StoredState {
   const saved = window.localStorage.getItem(storageKey)
@@ -226,6 +227,12 @@ function readStoredState(): StoredState {
   } catch {
     return defaultState
   }
+}
+
+function readInitialTab(): Tab {
+  const hash = window.location.hash.replace('#', '')
+
+  return tabs.includes(hash as Tab) ? (hash as Tab) : 'today'
 }
 
 function roundLoad(value: number) {
@@ -385,7 +392,7 @@ function buildRoutineLogs(routine: Routine, state: StoredState): ExerciseLog[] {
 
 function App() {
   const [storedState, setStoredState] = useState<StoredState>(() => readStoredState())
-  const [activeTab, setActiveTab] = useState<Tab>('today')
+  const [activeTab, setActiveTab] = useState<Tab>(() => readInitialTab())
   const [activeWorkoutName, setActiveWorkoutName] = useState('Lower Strength')
   const [activeLogs, setActiveLogs] = useState<ExerciseLog[]>(() => buildRoutineLogs(routines[0], readStoredState()))
   const [startedAt, setStartedAt] = useState(() => Date.now())
@@ -407,6 +414,22 @@ function App() {
   const currentTarget = roundLoad(
     storedState.workingMaxes[selectedLift] * 0.76 * (1 + selectedAdjustment.percent / 100),
   )
+  const activeSetCount = activeLogs.reduce((total, exercise) => total + exercise.sets.length, 0)
+  const completedSetCount = activeLogs.reduce(
+    (total, exercise) => total + exercise.sets.filter((set) => set.done).length,
+    0,
+  )
+  const latestSession = storedState.sessions[0]
+  const primaryRoutine = routines[0]
+  const targetCards = (Object.keys(liftLabels) as LiftId[]).map((lift) => {
+    const adjustment = getAdjustment(lift, storedState.readiness, storedState.profile.preference)
+
+    return {
+      lift,
+      adjustment,
+      target: roundLoad(storedState.workingMaxes[lift] * 0.76 * (1 + adjustment.percent / 100)),
+    }
+  })
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(storedState))
@@ -466,7 +489,12 @@ function App() {
     setActiveWorkoutName(routine.name)
     setActiveLogs(buildRoutineLogs(routine, storedState))
     setStartedAt(() => Date.now())
-    setActiveTab('log')
+    selectTab('log')
+  }
+
+  function selectTab(tab: Tab) {
+    setActiveTab(tab)
+    window.history.replaceState(null, '', `#${tab}`)
   }
 
   function updateSet(exerciseLogId: string, setId: string, next: Partial<SetLog>) {
@@ -548,13 +576,14 @@ function App() {
 
       return record > previous ? [`${exerciseName} e1RM ${record}`] : []
     })
+    const finishedAt = Number(new Date())
     const session: Session = {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
       name: activeWorkoutName,
       readinessStatus,
       readinessScore,
-      durationMinutes: Math.max(1, Math.round((Date.now() - startedAt) / 60000)),
+      durationMinutes: Math.max(1, Math.round((finishedAt - startedAt) / 60000)),
       exercises: completedLogs,
       prs,
     }
@@ -565,8 +594,8 @@ function App() {
       syncQueue: [...state.syncQueue, `session-${session.id}`],
     }))
     setActiveLogs(buildRoutineLogs(routines[0], storedState))
-    setStartedAt(Date.now())
-    setActiveTab('history')
+    setStartedAt(() => Date.now())
+    selectTab('history')
   }
 
   function completeSet(exerciseId: string, set: SetLog, restSeconds: number) {
@@ -586,7 +615,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${activeTab === 'log' ? 'is-logging' : ''}`}>
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-block">
           <span className="brand-mark">SB</span>
@@ -597,11 +626,11 @@ function App() {
         </div>
 
         <nav className="tabs" aria-label="App sections">
-          {(['today', 'log', 'history', 'progress'] as Tab[]).map((tab) => (
+          {tabs.map((tab) => (
             <button
               className={activeTab === tab ? 'is-active' : ''}
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => selectTab(tab)}
               type="button"
             >
               <span aria-hidden="true">{tab === 'today' ? 'T' : tab === 'log' ? 'L' : tab === 'history' ? 'H' : 'P'}</span>
@@ -626,7 +655,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">StrengthBoard</p>
-            <h1>Today&apos;s Training</h1>
+            <h1>{activeTab === 'log' ? activeWorkoutName : "Today's Training"}</h1>
           </div>
           <div className="profile-pill">
             <span>{storedState.profile.name}</span>
@@ -636,18 +665,48 @@ function App() {
 
         {activeTab === 'today' && (
           <div className="view-stack">
-            <section className="readiness-band" style={{ '--tone': statusTone[readinessStatus] } as CSSProperties}>
-              <div>
-                <p className="eyebrow">Today</p>
-                <h2>{readinessStatus} readiness</h2>
-                <p className="muted">
-                  Score {readinessScore}. {sorenessLabels[storedState.readiness.sorenessArea]} soreness and sleep are applied to today&apos;s main lifts.
+            <section className="command-center">
+              <div className="command-copy">
+                <p className="eyebrow">Readiness</p>
+                <h2>{readinessStatus[0].toUpperCase()}{readinessStatus.slice(1)} day. Train with adjusted targets.</h2>
+                <p>
+                  Score {readinessScore}. {sorenessLabels[storedState.readiness.sorenessArea]} soreness and sleep are built into today&apos;s main lift targets.
                 </p>
+                <div className="command-actions">
+                  <button className="primary-action" onClick={() => startRoutine(primaryRoutine)} type="button">
+                    Start {primaryRoutine.name}
+                  </button>
+                  <button className="secondary-action compact-action" onClick={() => selectTab('log')} type="button">
+                    Open logger
+                  </button>
+                </div>
               </div>
-              <div className="score-box">
-                <strong>{readinessScore}</strong>
-                <span>/100</span>
+              <div className="command-metrics">
+                <div className="score-box">
+                  <strong>{readinessScore}</strong>
+                  <span>/100</span>
+                </div>
+                <div className="target-readout hero-target">
+                  <span>Squat target</span>
+                  <strong>{formatLoad(targetCards[0].target)} {storedState.profile.units}</strong>
+                  <p>{targetCards[0].adjustment.percent > 0 ? '+' : ''}{targetCards[0].adjustment.percent}% adjustment</p>
+                </div>
               </div>
+            </section>
+
+            <section className="target-strip" aria-label="Today target adjustments">
+              {targetCards.map((item) => (
+                <button
+                  className={selectedLift === item.lift ? 'is-active' : ''}
+                  key={item.lift}
+                  onClick={() => setSelectedLift(item.lift)}
+                  type="button"
+                >
+                  <span>{liftLabels[item.lift]}</span>
+                  <strong>{formatLoad(item.target)} {storedState.profile.units}</strong>
+                  <small>{item.adjustment.percent > 0 ? '+' : ''}{item.adjustment.percent}%</small>
+                </button>
+              ))}
             </section>
 
             <section className="split-layout">
@@ -752,11 +811,26 @@ function App() {
                 </button>
               ))}
             </section>
+
+            <section className="summary-strip">
+              <div>
+                <span>Last session</span>
+                <strong>{latestSession?.name ?? 'No sessions'}</strong>
+              </div>
+              <div>
+                <span>Week volume</span>
+                <strong>{Math.round(weeklySummary.volume).toLocaleString()} {storedState.profile.units}</strong>
+              </div>
+              <div>
+                <span>Sync queue</span>
+                <strong>{storedState.syncQueue.length}</strong>
+              </div>
+            </section>
           </div>
         )}
 
         {activeTab === 'log' && (
-          <div className="view-stack">
+          <div className="view-stack log-workspace">
             <section className="panel workout-header">
               <div>
                 <p className="eyebrow">Active workout</p>
@@ -767,6 +841,10 @@ function App() {
                 />
               </div>
               <div className="timer-box">
+                <span>Sets</span>
+                <strong>{completedSetCount}/{activeSetCount}</strong>
+              </div>
+              <div className="timer-box">
                 <span>Rest</span>
                 <strong>{Math.floor(restSeconds / 60)}:{String(restSeconds % 60).padStart(2, '0')}</strong>
               </div>
@@ -775,7 +853,8 @@ function App() {
               </button>
             </section>
 
-            <section className="exercise-list">
+            <section className="log-grid">
+              <div className="exercise-list">
               {activeLogs.map((exerciseLog) => {
                 const exercise = findExercise(exerciseLog.exerciseId)
                 const routineEntry = routines.flatMap((routine) => routine.exercises).find((entry) => entry.exerciseId === exercise.id)
@@ -795,13 +874,13 @@ function App() {
                     {exerciseLog.targetReason && <p className="muted">{exerciseLog.targetReason}</p>}
                     <div className="sets-table">
                       <div className="sets-row sets-head">
-                        <span>Done</span>
-                        <span>Weight</span>
+                        <span>Set</span>
+                        <span>{storedState.profile.units}</span>
                         <span>Reps</span>
                         <span>RPE</span>
                         <span>Note</span>
                       </div>
-                      {exerciseLog.sets.map((set) => (
+                      {exerciseLog.sets.map((set, index) => (
                         <div className={`sets-row ${set.done ? 'is-done' : ''}`} key={set.id}>
                           <button
                             aria-label={set.done ? 'Mark set incomplete' : 'Mark set done'}
@@ -809,7 +888,7 @@ function App() {
                             onClick={() => completeSet(exerciseLog.id, set, routineEntry?.restSeconds ?? 120)}
                             type="button"
                           >
-                            {set.done ? '✓' : ''}
+                            {set.done ? '✓' : index + 1}
                           </button>
                           <input
                             aria-label="Weight"
@@ -850,30 +929,58 @@ function App() {
                   </div>
                 )
               })}
+              </div>
+
+              <aside className="log-sidecar">
+                <section className="panel">
+                  <p className="eyebrow">Session</p>
+                  <h2>{completedSetCount} sets logged</h2>
+                  <div className="sidecar-metrics">
+                    <div>
+                      <span>Rest</span>
+                      <strong>{Math.floor(restSeconds / 60)}:{String(restSeconds % 60).padStart(2, '0')}</strong>
+                    </div>
+                    <div>
+                      <span>Readiness</span>
+                      <strong>{readinessScore}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="panel">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">Exercise library</p>
+                      <h2>Add movement</h2>
+                    </div>
+                    <input
+                      aria-label="Search exercises"
+                      onChange={(event) => setExerciseSearch(event.target.value)}
+                      placeholder="Search"
+                      value={exerciseSearch}
+                    />
+                  </div>
+                  <div className="library-grid">
+                    {filteredExercises.map((exercise) => (
+                      <button key={exercise.id} onClick={() => addExercise(exercise.id)} type="button">
+                        <strong>{exercise.name}</strong>
+                        <span>{exercise.category}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </aside>
             </section>
 
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Exercise library</p>
-                  <h2>Add movement</h2>
-                </div>
-                <input
-                  aria-label="Search exercises"
-                  onChange={(event) => setExerciseSearch(event.target.value)}
-                  placeholder="Search"
-                  value={exerciseSearch}
-                />
+            <div className="mobile-workout-bar">
+              <div>
+                <span>{completedSetCount}/{activeSetCount} sets</span>
+                <strong>Rest {Math.floor(restSeconds / 60)}:{String(restSeconds % 60).padStart(2, '0')}</strong>
               </div>
-              <div className="library-grid">
-                {filteredExercises.map((exercise) => (
-                  <button key={exercise.id} onClick={() => addExercise(exercise.id)} type="button">
-                    <strong>{exercise.name}</strong>
-                    <span>{exercise.category}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
+              <button className="primary-action" onClick={finishSession} type="button">
+                Complete
+              </button>
+            </div>
           </div>
         )}
 
