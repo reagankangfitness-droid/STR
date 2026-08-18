@@ -35,6 +35,14 @@ type Checkin = {
 }
 
 type LoggedSet = { exerciseId: string; index: number; kg: number; reps: number; rpe: number | null; at: string }
+type NextRecommendation = {
+  exerciseId: string
+  exerciseName: string
+  currentKg: number
+  nextKg: number
+  decision: 'increase' | 'repeat' | 'reduce'
+  reason: string
+}
 
 type Session = {
   id: string
@@ -44,6 +52,7 @@ type Session = {
   sets: LoggedSet[]
   durationMin: number
   prs: string[]
+  recommendations?: NextRecommendation[]
   note?: string
 }
 
@@ -74,6 +83,7 @@ type StoredState = {
   restStartedAt: string | null
   selectedLift: Lift
   setOverrides: Record<string, SetOverride>
+  nextLoads: Record<string, number>
 }
 
 type TargetResult = {
@@ -85,7 +95,7 @@ type TargetResult = {
 }
 
 const storageKey = 'sb.v1'
-const contentVersion = 'beginner-v1'
+const contentVersion = 'beginner-v2'
 const tabs: Tab[] = ['today', 'log', 'history', 'progress']
 const restSeconds = 180
 
@@ -217,6 +227,67 @@ const workouts: Workout[] = [
       },
     ],
   },
+  {
+    id: 'full-body-practice',
+    name: 'Full Body Practice',
+    detail: 'Deadlift, push, pull and carry basics',
+    exercises: [
+      {
+        id: 'deadlift-practice',
+        name: 'Deadlift Practice',
+        category: 'Deadlift',
+        lift: 'deadlift',
+        pctOfMax: 0.5,
+        sets: 3,
+        reps: 5,
+        rpe: 7,
+        guide: {
+          purpose: 'Learn to push the floor away while keeping the bar close.',
+          cues: ['Bar over midfoot', 'Brace before pulling', 'Stand tall, then reset'],
+          caution: 'Stop adding weight if the back position changes.',
+        },
+      },
+      {
+        id: 'incline-push-up',
+        name: 'Incline Push-Up',
+        category: 'Accessory',
+        sets: 3,
+        reps: 8,
+        rpe: 7,
+        guide: {
+          purpose: 'Practice pressing with a stable body line.',
+          cues: ['Hands under shoulders', 'Body moves as one', 'Chest reaches the bench'],
+          caution: 'Raise the hands higher if the hips sag.',
+        },
+      },
+      {
+        id: 'seated-cable-row',
+        name: 'Seated Cable Row',
+        category: 'Pull',
+        sets: 3,
+        reps: 10,
+        rpe: 7,
+        guide: {
+          purpose: 'Build pulling control before heavier rows.',
+          cues: ['Sit tall', 'Pull elbows back', 'Pause without leaning'],
+          caution: 'Reduce load if the torso starts rocking.',
+        },
+      },
+      {
+        id: 'farmer-carry',
+        name: 'Farmer Carry',
+        category: 'Accessory',
+        sets: 3,
+        reps: 30,
+        rpe: 7,
+        guide: {
+          purpose: 'Train grip, posture and trunk control.',
+          cues: ['Stand tall', 'Walk slowly', 'Keep shoulders level'],
+          caution: 'Use lighter handles if posture breaks before the distance is done.',
+        },
+      },
+    ],
+  },
 ]
 
 const defaultCheckin: Checkin = {
@@ -236,6 +307,16 @@ const seedSessions: Session[] = [
       readiness: 82,
       durationMin: 58,
       prs: ['Back Squat top set'],
+      recommendations: [
+        {
+          exerciseId: 'back-squat',
+          exerciseName: 'Back Squat',
+          currentKg: 30,
+          nextKg: 32.5,
+          decision: 'increase',
+          reason: 'All sets completed at RPE 7.5 or lower.',
+        },
+      ],
       sets: [
         { exerciseId: 'back-squat', index: 0, kg: 30, reps: 5, rpe: 7, at: '2026-08-10T10:20:00.000Z' },
         { exerciseId: 'back-squat', index: 1, kg: 30, reps: 5, rpe: 7, at: '2026-08-10T10:24:00.000Z' },
@@ -249,6 +330,16 @@ const seedSessions: Session[] = [
       readiness: 67,
       durationMin: 52,
       prs: [],
+      recommendations: [
+        {
+          exerciseId: 'bench-press',
+          exerciseName: 'Bench Press',
+          currentKg: 22.5,
+          nextKg: 22.5,
+          decision: 'repeat',
+          reason: 'Repeat for cleaner reps before adding weight.',
+        },
+      ],
       sets: [
         { exerciseId: 'bench-press', index: 0, kg: 22.5, reps: 5, rpe: 7, at: '2026-08-13T10:20:00.000Z' },
         { exerciseId: 'bench-press', index: 1, kg: 22.5, reps: 5, rpe: 7.5, at: '2026-08-13T10:24:00.000Z' },
@@ -272,6 +363,7 @@ function createDefaultState(): StoredState {
     restStartedAt: null,
     selectedLift: 'squat',
     setOverrides: {},
+    nextLoads: {},
   }
 }
 
@@ -303,6 +395,7 @@ function readState(): StoredState {
       activeSets: parsed.activeSets ?? [],
       activeExtraSets: parsed.activeExtraSets ?? {},
       setOverrides: parsed.setOverrides ?? {},
+      nextLoads: parsed.nextLoads ?? {},
     }
   } catch {
     return defaultState
@@ -374,13 +467,16 @@ function targetFor(exercise: PlannedExercise, state: StoredState, score: number)
   const sleepFactor = baseAdj < 0 && state.checkin.sleep <= 3 ? -1 : 0
   const sorenessFactor = hasSoreness ? baseAdj - readinessFactor - sleepFactor : 0
   const adj = readinessFactor + sleepFactor + sorenessFactor
-  const planned = state.maxes[exercise.lift] * exercise.pctOfMax
+  const programmed = state.nextLoads[exercise.id]
+  const planned = programmed ?? state.maxes[exercise.lift] * exercise.pctOfMax
 
   return {
     exercise,
     kg: roundTo2_5(planned * (1 + adj / 100)),
     adj,
-    basis: `${Math.round(exercise.pctOfMax * 100)}% of ${state.maxes[exercise.lift]} ${state.profile.units} max`,
+    basis: programmed
+      ? `Programmed from last session`
+      : `${Math.round(exercise.pctOfMax * 100)}% of ${state.maxes[exercise.lift]} ${state.profile.units} max`,
     factors: [
       { label: 'Readiness', value: readinessFactor },
       { label: 'Sleep', value: sleepFactor },
@@ -406,6 +502,57 @@ function guideFor(exercise: PlannedExercise) {
     purpose: 'Use a controlled weight and keep the reps repeatable.',
     cues: ['Move smoothly', 'Keep two reps left', 'Log the set after it is done'],
     caution: 'If the movement changes, keep the load the same next time.',
+  }
+}
+
+function nextWorkoutId(items: Workout[], currentId: string) {
+  const index = items.findIndex((workout) => workout.id === currentId)
+  return items[(index + 1) % items.length]?.id ?? items[0]?.id ?? currentId
+}
+
+function recommendationFor(exercise: PlannedExercise, sets: LoggedSet[]): NextRecommendation | null {
+  if (!exercise.lift) return null
+  const exerciseSets = sets.filter((set) => set.exerciseId === exercise.id)
+  if (!exerciseSets.length) return null
+
+  const currentKg = exerciseSets[exerciseSets.length - 1]?.kg ?? 0
+  const maxRpe = Math.max(...exerciseSets.map((set) => set.rpe ?? exercise.rpe ?? 7))
+  const completedPlannedSets = exerciseSets.length >= exercise.sets
+  const completedReps = exerciseSets.every((set) => set.reps >= exercise.reps)
+  const missedBadly = exerciseSets.some((set) => set.reps <= exercise.reps - 2) || exerciseSets.length < Math.max(1, exercise.sets - 1)
+  const increment = 2.5
+
+  if (completedPlannedSets && completedReps && maxRpe <= 7) {
+    return {
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      currentKg,
+      nextKg: roundTo2_5(currentKg + increment),
+      decision: 'increase',
+      reason: `All sets completed at RPE ${formatRpe(maxRpe)} or lower.`,
+    }
+  }
+
+  if (missedBadly && maxRpe >= 9) {
+    return {
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      currentKg,
+      nextKg: Math.max(0, roundTo2_5(currentKg - increment)),
+      decision: 'reduce',
+      reason: `Reps were missed at RPE ${formatRpe(maxRpe)}.`,
+    }
+  }
+
+  return {
+    exerciseId: exercise.id,
+    exerciseName: exercise.name,
+    currentKg,
+    nextKg: currentKg,
+    decision: 'repeat',
+    reason: completedPlannedSets && completedReps
+      ? `Sets were completed at RPE ${formatRpe(maxRpe)}. Repeat for cleaner reps.`
+      : 'Finish the listed sets before adding weight.',
   }
 }
 
@@ -453,6 +600,7 @@ function App() {
   const selectedTarget = state.workouts
     .flatMap((workout) => workout.exercises)
     .find((exercise) => exercise.lift === state.selectedLift)
+  const latestRecommendation = state.sessions[0]?.recommendations?.[0]
   const restRemaining = state.restStartedAt
     ? Math.min(restSeconds, Math.max(0, restSeconds - Math.floor((tick - Number(new Date(state.restStartedAt))) / 1000)))
     : 0
@@ -757,6 +905,10 @@ function App() {
   function completeSession() {
     const finishedAt = new Date()
     const startedAt = state.activeStartedAt ? Number(new Date(state.activeStartedAt)) : Number(finishedAt)
+    const recommendations = activeWorkout.exercises
+      .map((exercise) => recommendationFor(exercise, state.activeSets))
+      .filter((recommendation): recommendation is NextRecommendation => Boolean(recommendation))
+    const primaryRecommendation = recommendations[0]
     const session: Session = {
       id: crypto.randomUUID(),
       date: finishedAt.toISOString(),
@@ -764,12 +916,21 @@ function App() {
       readiness: score,
       sets: state.activeSets,
       durationMin: Math.max(1, Math.round((Number(finishedAt) - startedAt) / 60000)),
-      prs: state.activeSets.some((set) => set.exerciseId === 'back-squat') ? ['Back Squat top set'] : [],
+      prs: primaryRecommendation?.decision === 'increase' ? [`${primaryRecommendation.exerciseName} ready to increase`] : [],
+      recommendations,
+      note: primaryRecommendation
+        ? `${primaryRecommendation.exerciseName}: next ${formatKg(primaryRecommendation.nextKg)} kg. ${primaryRecommendation.reason}`
+        : undefined,
     }
 
     setState((current) => ({
       ...current,
       sessions: [session, ...current.sessions],
+      activeWorkoutId: nextWorkoutId(current.workouts, current.activeWorkoutId),
+      nextLoads: recommendations.reduce(
+        (loads, recommendation) => ({ ...loads, [recommendation.exerciseId]: recommendation.nextKg }),
+        current.nextLoads,
+      ),
       activeSets: [],
       activeExtraSets: {},
       activeStartedAt: null,
@@ -792,6 +953,7 @@ function App() {
             <Today
               activeWorkout={activeWorkout}
               focusTarget={focusTarget}
+              latestRecommendation={latestRecommendation}
               patchCheckin={patchCheckin}
             profile={state.profile}
             score={score}
@@ -862,6 +1024,7 @@ function App() {
 function Today({
   activeWorkout,
   focusTarget,
+  latestRecommendation,
   patchCheckin,
   profile,
   score,
@@ -875,6 +1038,7 @@ function Today({
 }: {
   activeWorkout: Workout
   focusTarget?: TargetResult
+  latestRecommendation?: NextRecommendation
   patchCheckin: (next: Partial<Checkin>) => void
   profile: Profile
   score: number
@@ -936,6 +1100,14 @@ function Today({
         </button>
 
         <p className="beginner-note">Work one exercise at a time. Log the set, rest three minutes, repeat the listed reps.</p>
+        <div className="programming-note">
+          <span>Programming</span>
+          <p>
+            {latestRecommendation
+              ? `${latestRecommendation.exerciseName}: next ${formatKg(latestRecommendation.nextKg)} ${profile.units}. ${latestRecommendation.reason}`
+              : 'Complete every set at RPE 7 or lower, then add 2.5 kg next time.'}
+          </p>
+        </div>
 
         <div className="session-preview">
           {previewExercises.map((exercise, index) => {
@@ -1316,13 +1488,18 @@ function History({ queued, sessions }: { queued: number; sessions: Session[] }) 
       <section className="history-list">
         {sessions.length ? sessions.map((session) => {
           const top = session.sets[0]
+          const recommendation = session.recommendations?.[0]
           return (
             <article className="history-row" key={session.id}>
               <strong className={session.readiness >= 70 ? 'sage-text' : 'amber-text'}>{session.readiness}</strong>
               <div>
                 <div><h2>{session.workoutName}</h2><time>{dateLabel(session.date)}</time></div>
                 <p>{session.durationMin} min · controlled reps · logged in order</p>
-                <em>{top ? `${top.exerciseId.replace('-', ' ').toUpperCase()} ${formatKg(top.kg)} × ${top.reps} · ${session.prs[0] ?? 'TOP SET'}` : 'NO SETS'}</em>
+                <em>
+                  {recommendation
+                    ? `${recommendation.exerciseName.toUpperCase()} NEXT ${formatKg(recommendation.nextKg)} KG · ${recommendation.decision}`
+                    : top ? `${top.exerciseId.replace('-', ' ').toUpperCase()} ${formatKg(top.kg)} × ${top.reps} · TOP SET` : 'NO SETS'}
+                </em>
               </div>
             </article>
           )
@@ -1406,9 +1583,13 @@ function Progress({
         ))}
       </section>
       <section className="also-moving">
-        <h2 className="section-label">Recent PRs</h2>
-        <div><span>Back Squat</span><strong>30 × 5</strong></div>
-        <div><span>Bench Press</span><strong>22.5 × 5</strong></div>
+        <h2 className="section-label">Next Weights</h2>
+        {sessions.flatMap((session) => session.recommendations ?? []).slice(0, 2).map((recommendation, index) => (
+          <div key={`${recommendation.exerciseId}-${recommendation.nextKg}-${index}`}>
+            <span>{recommendation.exerciseName}</span>
+            <strong>{formatKg(recommendation.nextKg)} KG</strong>
+          </div>
+        ))}
       </section>
 
       <section className="setup-panel">
