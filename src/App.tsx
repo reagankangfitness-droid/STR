@@ -44,6 +44,15 @@ type Session = {
 
 type SyncState = { online: boolean; queued: number }
 type SetOverride = { kg: number; reps: number; rpe: number | null }
+type ExerciseDraft = {
+  name: string
+  category: PlannedExercise['category']
+  lift: Lift | 'none'
+  pctOfMax: number
+  sets: number
+  reps: number
+  rpe: number
+}
 
 type StoredState = {
   profile: Profile
@@ -110,12 +119,7 @@ const defaultCheckin: Checkin = {
   note: '',
 }
 
-const defaultState: StoredState = {
-  profile,
-  maxes,
-  workouts,
-  checkin: defaultCheckin,
-  sessions: [
+const seedSessions: Session[] = [
     {
       id: 'seed-session-1',
       date: '2026-08-10T10:00:00.000Z',
@@ -141,15 +145,24 @@ const defaultState: StoredState = {
         { exerciseId: 'bench-press', index: 1, kg: 72.5, reps: 5, rpe: 8.5, at: '2026-08-13T10:24:00.000Z' },
       ],
     },
-  ],
-  sync: { online: true, queued: 1 },
-  activeWorkoutId: 'lower-strength',
-  activeSets: [],
-  activeExtraSets: {},
-  activeStartedAt: null,
-  restStartedAt: null,
-  selectedLift: 'squat',
-  setOverrides: {},
+]
+
+function createDefaultState(): StoredState {
+  return {
+    profile,
+    maxes,
+    workouts,
+    checkin: { ...defaultCheckin, date: new Date().toISOString().slice(0, 10) },
+    sessions: seedSessions,
+    sync: { online: true, queued: 1 },
+    activeWorkoutId: 'lower-strength',
+    activeSets: [],
+    activeExtraSets: {},
+    activeStartedAt: null,
+    restStartedAt: null,
+    selectedLift: 'squat',
+    setOverrides: {},
+  }
 }
 
 const readouts = {
@@ -160,6 +173,7 @@ const readouts = {
 
 function readState(): StoredState {
   const saved = window.localStorage.getItem(storageKey)
+  const defaultState = createDefaultState()
 
   if (!saved) return defaultState
 
@@ -198,6 +212,10 @@ function roundTo2_5(value: number) {
 
 function roundToHalf(value: number) {
   return Math.round(value * 2) / 2
+}
+
+function roundPercent(value: number) {
+  return Math.round(value / 2.5) * 2.5
 }
 
 function formatKg(value: number | null | undefined) {
@@ -267,6 +285,11 @@ function workoutSetCount(workout: Workout) {
   return workout.exercises.reduce((total, exercise) => total + exercise.sets, 0)
 }
 
+function makeId(value: string) {
+  const base = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return `${base || 'exercise'}-${Date.now().toString(36)}`
+}
+
 function App() {
   const [state, setState] = useState<StoredState>(() => readState())
   const [tab, setTab] = useState<Tab>(() => readInitialTab())
@@ -276,7 +299,6 @@ function App() {
 
   const score = scoreCheckin(state.checkin)
   const lowerWorkout = state.workouts[0]
-  const upperWorkout = state.workouts[1]
   const activeWorkout = state.workouts.find((workout) => workout.id === state.activeWorkoutId) ?? lowerWorkout
   const targetMap = useMemo(() => {
     return new Map(
@@ -286,6 +308,8 @@ function App() {
     )
   }, [score, state])
   const squatTarget = targetMap.get('back-squat')
+  const activeMainExercise = activeWorkout.exercises.find((exercise) => exercise.lift)
+  const focusTarget = activeMainExercise ? targetMap.get(activeMainExercise.id) : squatTarget
   const setRows = activeWorkout.exercises.flatMap((exercise) =>
     Array.from({ length: exercise.sets + (state.activeExtraSets[exercise.id] ?? 0) }, (_, index) => ({
       exercise,
@@ -308,13 +332,13 @@ function App() {
   const restRemaining = state.restStartedAt
     ? Math.min(restSeconds, Math.max(0, restSeconds - Math.floor((tick - Number(new Date(state.restStartedAt))) / 1000)))
     : 0
-  const verdict = (squatTarget?.adj ?? 0) === 0
+  const verdict = (focusTarget?.adj ?? 0) === 0
     ? {
         badge: 'PLAN HELD',
         sentence: 'Green day. Sleep and soreness are inside range — run the targets as written.',
       }
     : {
-        badge: `${squatTarget?.adj ?? 0}% ADJUSTED`,
+        badge: `${focusTarget?.adj ?? 0}% ADJUSTED`,
         sentence: 'Yellow day. Sleep and leg soreness are built into today\'s main lift targets.',
       }
 
@@ -358,6 +382,129 @@ function App() {
       },
       sync: { ...current.sync, queued: current.sync.queued + 1 },
     }))
+  }
+
+  function setTodayWorkout(workoutId: string) {
+    setState((current) => ({
+      ...current,
+      activeWorkoutId: workoutId,
+      activeSets: current.activeWorkoutId === workoutId ? current.activeSets : [],
+      activeExtraSets: current.activeWorkoutId === workoutId ? current.activeExtraSets : {},
+      activeStartedAt: current.activeWorkoutId === workoutId ? current.activeStartedAt : null,
+      restStartedAt: current.activeWorkoutId === workoutId ? current.restStartedAt : null,
+      setOverrides: current.activeWorkoutId === workoutId ? current.setOverrides : {},
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function updateExercise(workoutId: string, exerciseId: string, patch: Partial<PlannedExercise>) {
+    setState((current) => ({
+      ...current,
+      workouts: current.workouts.map((workout) =>
+        workout.id === workoutId
+          ? {
+              ...workout,
+              exercises: workout.exercises.map((exercise) =>
+                exercise.id === exerciseId ? { ...exercise, ...patch } : exercise,
+              ),
+            }
+          : workout,
+      ),
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function adjustExercise(
+    workoutId: string,
+    exerciseId: string,
+    field: 'sets' | 'reps' | 'pctOfMax' | 'rpe',
+    delta: number,
+  ) {
+    setState((current) => ({
+      ...current,
+      workouts: current.workouts.map((workout) =>
+        workout.id === workoutId
+          ? {
+              ...workout,
+              exercises: workout.exercises.map((exercise) => {
+                if (exercise.id !== exerciseId) return exercise
+                if (field === 'sets' || field === 'reps') return { ...exercise, [field]: Math.max(1, exercise[field] + delta) }
+                if (field === 'rpe') return { ...exercise, rpe: Math.max(1, Math.min(10, roundToHalf((exercise.rpe ?? 7) + delta))) }
+                return { ...exercise, pctOfMax: Math.max(0.3, Math.min(1.2, roundPercent((exercise.pctOfMax ?? 0.7) * 100 + delta) / 100)) }
+              }),
+            }
+          : workout,
+      ),
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function setExerciseLift(workoutId: string, exerciseId: string, lift: Lift | 'none') {
+    const categoryByLift: Record<Lift, PlannedExercise['category']> = {
+      squat: 'Squat',
+      bench: 'Bench',
+      deadlift: 'Deadlift',
+      press: 'Press',
+    }
+    setState((current) => ({
+      ...current,
+      workouts: current.workouts.map((workout) =>
+        workout.id === workoutId
+          ? {
+              ...workout,
+              exercises: workout.exercises.map((exercise) =>
+                exercise.id === exerciseId
+                  ? lift === 'none'
+                    ? { ...exercise, lift: undefined, pctOfMax: undefined }
+                    : { ...exercise, lift, category: categoryByLift[lift], pctOfMax: exercise.pctOfMax ?? 0.7 }
+                  : exercise,
+              ),
+            }
+          : workout,
+      ),
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function removeExercise(workoutId: string, exerciseId: string) {
+    setState((current) => ({
+      ...current,
+      workouts: current.workouts.map((workout) =>
+        workout.id === workoutId && workout.exercises.length > 1
+          ? { ...workout, exercises: workout.exercises.filter((exercise) => exercise.id !== exerciseId) }
+          : workout,
+      ),
+      activeSets: current.activeSets.filter((set) => set.exerciseId !== exerciseId),
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function addCustomExercise(workoutId: string, draft: ExerciseDraft) {
+    const exercise: PlannedExercise = {
+      id: makeId(draft.name),
+      name: draft.name.trim() || 'Custom Exercise',
+      category: draft.category,
+      sets: draft.sets,
+      reps: draft.reps,
+      rpe: draft.rpe,
+      ...(draft.lift === 'none' ? {} : { lift: draft.lift, pctOfMax: draft.pctOfMax }),
+    }
+
+    setState((current) => ({
+      ...current,
+      workouts: current.workouts.map((workout) =>
+        workout.id === workoutId ? { ...workout, exercises: [...workout.exercises, exercise] } : workout,
+      ),
+      sync: { ...current.sync, queued: current.sync.queued + 1 },
+    }))
+  }
+
+  function resetLocalData() {
+    window.localStorage.removeItem(storageKey)
+    setOverrideKey(null)
+    setShowWhy(false)
+    setState(createDefaultState())
+    selectTab('today')
   }
 
   function startWorkout(workoutId = lowerWorkout.id) {
@@ -519,18 +666,24 @@ function App() {
       <section className="screen">
         {tab === 'today' && (
             <Today
-              lowerWorkout={lowerWorkout}
+              activeWorkout={activeWorkout}
+              addCustomExercise={addCustomExercise}
+              adjustExercise={adjustExercise}
+              focusTarget={focusTarget}
               patchCheckin={patchCheckin}
             profile={state.profile}
+            removeExercise={removeExercise}
+            resetLocalData={resetLocalData}
             score={score}
+            setExerciseLift={setExerciseLift}
+            setTodayWorkout={setTodayWorkout}
             showWhy={showWhy}
-            squatTarget={squatTarget}
             startWorkout={startWorkout}
             state={state}
             syncNow={syncNow}
             targetMap={targetMap}
             updateMax={updateMax}
-            upperWorkout={upperWorkout}
+            updateExercise={updateExercise}
             verdict={verdict}
             setShowWhy={setShowWhy}
           />
@@ -580,37 +733,50 @@ function App() {
 }
 
 function Today({
-  lowerWorkout,
+  activeWorkout,
+  addCustomExercise,
+  adjustExercise,
+  focusTarget,
   patchCheckin,
   profile,
+  removeExercise,
+  resetLocalData,
   score,
+  setExerciseLift,
   setShowWhy,
+  setTodayWorkout,
   showWhy,
-  squatTarget,
   startWorkout,
   state,
   syncNow,
   targetMap,
   updateMax,
-  upperWorkout,
+  updateExercise,
   verdict,
 }: {
-  lowerWorkout: Workout
+  activeWorkout: Workout
+  addCustomExercise: (workoutId: string, draft: ExerciseDraft) => void
+  adjustExercise: (workoutId: string, exerciseId: string, field: 'sets' | 'reps' | 'pctOfMax' | 'rpe', delta: number) => void
+  focusTarget?: TargetResult
   patchCheckin: (next: Partial<Checkin>) => void
   profile: Profile
+  removeExercise: (workoutId: string, exerciseId: string) => void
+  resetLocalData: () => void
   score: number
+  setExerciseLift: (workoutId: string, exerciseId: string, lift: Lift | 'none') => void
   setShowWhy: (value: boolean) => void
+  setTodayWorkout: (workoutId: string) => void
   showWhy: boolean
-  squatTarget?: TargetResult
   startWorkout: (workoutId?: string) => void
   state: StoredState
   syncNow: () => void
   targetMap: Map<string, TargetResult>
   updateMax: (lift: Lift, delta: number) => void
-  upperWorkout: Workout
+  updateExercise: (workoutId: string, exerciseId: string, patch: Partial<PlannedExercise>) => void
   verdict: { badge: string; sentence: string }
 }) {
   const mainTargets = state.workouts.flatMap((workout) => workout.exercises.filter((exercise) => exercise.lift))
+  const targetLabel = focusTarget?.exercise.name ? `${focusTarget.exercise.name} target` : 'Target'
 
   return (
     <>
@@ -629,15 +795,15 @@ function Today({
           <p className="readiness-number">{score}<span>/100</span></p>
         </div>
         <div className="target-side">
-          <p className="micro">Squat target</p>
-          <p className="load-number">{formatKg(squatTarget?.kg)} <span>{profile.units}</span></p>
-          <button className={(squatTarget?.adj ?? 0) === 0 ? 'badge sage' : 'badge amber'} onClick={() => setShowWhy(!showWhy)} type="button">
+          <p className="micro">{targetLabel}</p>
+          <p className="load-number">{formatKg(focusTarget?.kg)} <span>{profile.units}</span></p>
+          <button className={(focusTarget?.adj ?? 0) === 0 ? 'badge sage' : 'badge amber'} onClick={() => setShowWhy(!showWhy)} type="button">
             {verdict.badge}
           </button>
         </div>
-        {showWhy && squatTarget && (
+        {showWhy && focusTarget && (
           <div className="why-panel">
-            {squatTarget.factors.map((factor) => (
+            {focusTarget.factors.map((factor) => (
               <span key={factor.label}>{factor.label} {factor.value}%</span>
             ))}
           </div>
@@ -676,27 +842,48 @@ function Today({
       </section>
 
       <section className="session-list">
-        <button className="session-choice today-choice" onClick={() => startWorkout(lowerWorkout.id)} type="button">
-          <span>{lowerWorkout.name}</span>
-          <p>{lowerWorkout.detail}</p>
-          <em>{workoutSetCount(lowerWorkout)} SETS</em>
-        </button>
-        <button className="session-choice" onClick={() => startWorkout(upperWorkout.id)} type="button">
-          <span>{upperWorkout.name}</span>
-          <p>{upperWorkout.detail}</p>
-          <em>TOMORROW</em>
-        </button>
+        <h2 className="section-label">Today&apos;s workout</h2>
+        {state.workouts.map((workout) => (
+          <button
+            className={workout.id === activeWorkout.id ? 'session-choice today-choice' : 'session-choice'}
+            key={workout.id}
+            onClick={() => setTodayWorkout(workout.id)}
+            type="button"
+          >
+            <span>{workout.name}</span>
+            <p>{workout.detail}</p>
+            <em>{workout.id === activeWorkout.id ? 'TODAY' : `${workoutSetCount(workout)} SETS`}</em>
+          </button>
+        ))}
       </section>
 
-      <button className="primary-button" onClick={() => startWorkout(lowerWorkout.id)} type="button">
-        <span>Start lower strength</span>
-        <span>→</span>
+      <section className="builder-list">
+        <h2 className="section-label">Workout editor</h2>
+        {activeWorkout.exercises.map((exercise) => (
+          <ExerciseEditor
+            adjustExercise={adjustExercise}
+            exercise={exercise}
+            key={exercise.id}
+            removeExercise={removeExercise}
+            setExerciseLift={setExerciseLift}
+            updateExercise={updateExercise}
+            workoutId={activeWorkout.id}
+          />
+        ))}
+        <AddExerciseForm addCustomExercise={addCustomExercise} workoutId={activeWorkout.id} />
+      </section>
+
+      <button className="primary-button" onClick={() => startWorkout(activeWorkout.id)} type="button">
+        <span>Start {activeWorkout.name}</span>
+        <span>Start</span>
       </button>
 
       <div className="sync-line">
         <span>● {state.sync.online ? 'ONLINE' : 'OFFLINE'} · {state.sync.queued} CHANGE WAITING</span>
         <button onClick={syncNow} type="button">Sync</button>
       </div>
+
+      <button className="reset-button" onClick={resetLocalData} type="button">Reset local data</button>
     </>
   )
 }
@@ -726,6 +913,151 @@ function MaxRow({
       <strong>{formatKg(value)} <em>{units}</em></strong>
       <button onClick={() => updateMax(lift, 2.5)} type="button">+2.5</button>
     </div>
+  )
+}
+
+function ExerciseEditor({
+  adjustExercise,
+  exercise,
+  removeExercise,
+  setExerciseLift,
+  updateExercise,
+  workoutId,
+}: {
+  adjustExercise: (workoutId: string, exerciseId: string, field: 'sets' | 'reps' | 'pctOfMax' | 'rpe', delta: number) => void
+  exercise: PlannedExercise
+  removeExercise: (workoutId: string, exerciseId: string) => void
+  setExerciseLift: (workoutId: string, exerciseId: string, lift: Lift | 'none') => void
+  updateExercise: (workoutId: string, exerciseId: string, patch: Partial<PlannedExercise>) => void
+  workoutId: string
+}) {
+  const liftValue = exercise.lift ?? 'none'
+
+  return (
+    <article className="exercise-editor">
+      <div className="editor-head">
+        <input
+          aria-label={`${exercise.name} name`}
+          onChange={(event) => updateExercise(workoutId, exercise.id, { name: event.target.value })}
+          value={exercise.name}
+        />
+        <button onClick={() => removeExercise(workoutId, exercise.id)} type="button">Remove</button>
+      </div>
+      <div className="editor-meta">
+        <span>{exercise.category}</span>
+        <span>{exercise.lift ? `${exercise.lift} · ${Math.round((exercise.pctOfMax ?? 0) * 100)}%` : 'left alone'}</span>
+      </div>
+      <div className="lift-picks">
+        {(['none', 'squat', 'bench', 'deadlift', 'press'] as Array<Lift | 'none'>).map((lift) => (
+          <button className={liftValue === lift ? 'active' : ''} key={lift} onClick={() => setExerciseLift(workoutId, exercise.id, lift)} type="button">
+            {lift}
+          </button>
+        ))}
+      </div>
+      <div className="edit-grid">
+        <StepperControl label="Sets" value={String(exercise.sets)} onDec={() => adjustExercise(workoutId, exercise.id, 'sets', -1)} onInc={() => adjustExercise(workoutId, exercise.id, 'sets', 1)} />
+        <StepperControl label="Reps" value={String(exercise.reps)} onDec={() => adjustExercise(workoutId, exercise.id, 'reps', -1)} onInc={() => adjustExercise(workoutId, exercise.id, 'reps', 1)} />
+        <StepperControl label="RPE" value={formatRpe(exercise.rpe)} onDec={() => adjustExercise(workoutId, exercise.id, 'rpe', -0.5)} onInc={() => adjustExercise(workoutId, exercise.id, 'rpe', 0.5)} />
+        {exercise.lift && (
+          <StepperControl
+            label="Percent"
+            value={`${Math.round((exercise.pctOfMax ?? 0.7) * 100)}%`}
+            onDec={() => adjustExercise(workoutId, exercise.id, 'pctOfMax', -2.5)}
+            onInc={() => adjustExercise(workoutId, exercise.id, 'pctOfMax', 2.5)}
+          />
+        )}
+      </div>
+    </article>
+  )
+}
+
+function StepperControl({
+  label,
+  onDec,
+  onInc,
+  value,
+}: {
+  label: string
+  onDec: () => void
+  onInc: () => void
+  value: string
+}) {
+  return (
+    <div className="mini-stepper">
+      <span>{label}</span>
+      <button onClick={onDec} type="button">−</button>
+      <strong>{value}</strong>
+      <button onClick={onInc} type="button">+</button>
+    </div>
+  )
+}
+
+function AddExerciseForm({
+  addCustomExercise,
+  workoutId,
+}: {
+  addCustomExercise: (workoutId: string, draft: ExerciseDraft) => void
+  workoutId: string
+}) {
+  const [draft, setDraft] = useState<ExerciseDraft>({
+    name: '',
+    category: 'Accessory',
+    lift: 'none',
+    pctOfMax: 0.7,
+    sets: 3,
+    reps: 8,
+    rpe: 8,
+  })
+  const categories: PlannedExercise['category'][] = ['Squat', 'Bench', 'Deadlift', 'Press', 'Hinge', 'Pull', 'Accessory']
+
+  function addExercise() {
+    addCustomExercise(workoutId, draft)
+    setDraft((current) => ({ ...current, name: '' }))
+  }
+
+  return (
+    <section className="add-exercise">
+      <h3>Add exercise</h3>
+      <input
+        aria-label="Custom exercise name"
+        onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+        placeholder="Exercise name"
+        value={draft.name}
+      />
+      <div className="category-picks">
+        {categories.map((category) => (
+          <button
+            className={draft.category === category ? 'active' : ''}
+            key={category}
+            onClick={() => setDraft((current) => ({ ...current, category }))}
+            type="button"
+          >
+            {category}
+          </button>
+        ))}
+      </div>
+      <div className="lift-picks">
+        {(['none', 'squat', 'bench', 'deadlift', 'press'] as Array<Lift | 'none'>).map((lift) => (
+          <button
+            className={draft.lift === lift ? 'active' : ''}
+            key={lift}
+            onClick={() => setDraft((current) => ({ ...current, lift }))}
+            type="button"
+          >
+            {lift}
+          </button>
+        ))}
+      </div>
+      <div className="edit-grid">
+        <StepperControl label="Sets" value={String(draft.sets)} onDec={() => setDraft((current) => ({ ...current, sets: Math.max(1, current.sets - 1) }))} onInc={() => setDraft((current) => ({ ...current, sets: current.sets + 1 }))} />
+        <StepperControl label="Reps" value={String(draft.reps)} onDec={() => setDraft((current) => ({ ...current, reps: Math.max(1, current.reps - 1) }))} onInc={() => setDraft((current) => ({ ...current, reps: current.reps + 1 }))} />
+        <StepperControl label="RPE" value={formatRpe(draft.rpe)} onDec={() => setDraft((current) => ({ ...current, rpe: Math.max(1, roundToHalf(current.rpe - 0.5)) }))} onInc={() => setDraft((current) => ({ ...current, rpe: Math.min(10, roundToHalf(current.rpe + 0.5)) }))} />
+        {draft.lift !== 'none' && (
+          <StepperControl label="Percent" value={`${Math.round(draft.pctOfMax * 100)}%`} onDec={() => setDraft((current) => ({ ...current, pctOfMax: Math.max(0.3, current.pctOfMax - 0.025) }))} onInc={() => setDraft((current) => ({ ...current, pctOfMax: Math.min(1.2, current.pctOfMax + 0.025) }))} />
+        )}
+      </div>
+      <button className="secondary-button add-button" onClick={addExercise} type="button">Add custom exercise</button>
+    </section>
   )
 }
 
