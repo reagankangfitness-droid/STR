@@ -319,6 +319,15 @@ button:disabled {
   line-height: 1.5;
 }
 
+.target-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-50);
+  font-size: 12px;
+  font-weight: 300;
+  line-height: 1.4;
+}
+
 .target-row > p {
   margin: 0;
   font-family: "Bebas Neue", sans-serif;
@@ -385,6 +394,56 @@ button:disabled {
   padding: 12px 0;
   color: var(--ink-50);
   font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.5;
+}
+
+.beginner-note {
+  margin: 10px 0 0;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  color: var(--ink-62);
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.coach-guide {
+  margin-top: 20px;
+}
+
+.coach-guide p {
+  margin: 12px 0 0;
+  color: var(--ink-62);
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.coach-guide div {
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.coach-guide span {
+  min-height: 44px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.coach-guide em {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink-50);
+  font-size: 12.5px;
+  font-style: normal;
   font-weight: 300;
   line-height: 1.5;
 }
@@ -778,7 +837,7 @@ button:disabled {
 .set-head,
 .set-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 54px 44px 40px;
+  grid-template-columns: 44px minmax(0, 1fr) 54px 44px 44px;
   gap: 10px;
   align-items: center;
 }
@@ -1120,8 +1179,8 @@ button:disabled {
 
   .set-head,
   .set-row {
-    grid-template-columns: 25px minmax(0, 1fr) 48px 40px 36px;
-    gap: 7px;
+    grid-template-columns: 44px minmax(0, 1fr) 48px 44px 44px;
+    gap: 6px;
   }
 
   .lift-picks {

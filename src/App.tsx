@@ -16,6 +16,11 @@ type PlannedExercise = {
   sets: number
   reps: number
   rpe?: number
+  guide?: {
+    purpose: string
+    cues: string[]
+    caution: string
+  }
 }
 
 type Workout = { id: string; name: string; detail: string; exercises: PlannedExercise[] }
@@ -55,6 +60,7 @@ type ExerciseDraft = {
 }
 
 type StoredState = {
+  contentVersion: string
   profile: Profile
   maxes: Maxes
   workouts: Workout[]
@@ -79,33 +85,136 @@ type TargetResult = {
 }
 
 const storageKey = 'sb.v1'
+const contentVersion = 'beginner-v1'
 const tabs: Tab[] = ['today', 'log', 'history', 'progress']
 const restSeconds = 180
 
-const profile: Profile = { name: 'Reagan', level: 'Intermediate', units: 'kg' }
-const maxes: Maxes = { squat: 150, bench: 100, deadlift: 185, press: 65 }
+const profile: Profile = { name: 'Reagan', level: 'Novice', units: 'kg' }
+const maxes: Maxes = { squat: 60, bench: 40, deadlift: 80, press: 25 }
 
 const workouts: Workout[] = [
   {
     id: 'lower-strength',
-    name: 'Lower Strength',
-    detail: 'Squat focus with hinge volume',
+    name: 'Start Lower',
+    detail: 'Squat pattern, hinge and single-leg control',
     exercises: [
-      { id: 'back-squat', name: 'Back Squat', category: 'Squat', lift: 'squat', pctOfMax: 0.7, sets: 3, reps: 5, rpe: 8 },
-      { id: 'romanian-deadlift', name: 'Romanian Deadlift', category: 'Hinge', sets: 3, reps: 8, rpe: 7 },
-      { id: 'split-squat', name: 'Split Squat', category: 'Accessory', sets: 3, reps: 8, rpe: 8 },
-      { id: 'ham-curl', name: 'Ham Curl', category: 'Accessory', sets: 3, reps: 10, rpe: 8 },
+      {
+        id: 'back-squat',
+        name: 'Back Squat',
+        category: 'Squat',
+        lift: 'squat',
+        pctOfMax: 0.55,
+        sets: 3,
+        reps: 5,
+        rpe: 7,
+        guide: {
+          purpose: 'Learn a steady squat pattern before chasing load.',
+          cues: ['Whole foot down', 'Knees track over toes', 'Stop with two reps left'],
+          caution: 'If depth or balance changes, keep the same weight next time.',
+        },
+      },
+      {
+        id: 'romanian-deadlift',
+        name: 'Romanian Deadlift',
+        category: 'Hinge',
+        sets: 3,
+        reps: 8,
+        rpe: 6,
+        guide: {
+          purpose: 'Practice hinging at the hips without turning it into a squat.',
+          cues: ['Soft knees', 'Hips move back', 'Bar stays close'],
+          caution: 'Stop the set when the lower back starts doing the work.',
+        },
+      },
+      {
+        id: 'split-squat',
+        name: 'Split Squat',
+        category: 'Accessory',
+        sets: 2,
+        reps: 8,
+        rpe: 7,
+        guide: {
+          purpose: 'Build single-leg control with a stable range of motion.',
+          cues: ['Tall torso', 'Front foot planted', 'Smooth descent'],
+          caution: 'Use bodyweight if balance is the limiting factor.',
+        },
+      },
+      {
+        id: 'ham-curl',
+        name: 'Ham Curl',
+        category: 'Accessory',
+        sets: 2,
+        reps: 10,
+        rpe: 7,
+        guide: {
+          purpose: 'Add hamstring work without loading the spine again.',
+          cues: ['Control the return', 'No hip lift', 'Full squeeze'],
+          caution: 'Choose a load that keeps every rep even.',
+        },
+      },
     ],
   },
   {
     id: 'upper-strength',
-    name: 'Upper Strength',
-    detail: 'Bench, press and upper back',
+    name: 'Start Upper',
+    detail: 'Press, pull and shoulder control',
     exercises: [
-      { id: 'bench-press', name: 'Bench Press', category: 'Bench', lift: 'bench', pctOfMax: 0.72, sets: 3, reps: 5, rpe: 8 },
-      { id: 'overhead-press', name: 'Overhead Press', category: 'Press', lift: 'press', pctOfMax: 0.73, sets: 3, reps: 5, rpe: 8 },
-      { id: 'barbell-row', name: 'Barbell Row', category: 'Pull', sets: 3, reps: 8, rpe: 8 },
-      { id: 'upper-accessories', name: 'Accessories', category: 'Accessory', sets: 3, reps: 12, rpe: 8 },
+      {
+        id: 'bench-press',
+        name: 'Bench Press',
+        category: 'Bench',
+        lift: 'bench',
+        pctOfMax: 0.55,
+        sets: 3,
+        reps: 5,
+        rpe: 7,
+        guide: {
+          purpose: 'Build pressing control with a repeatable bar path.',
+          cues: ['Feet planted', 'Shoulders set', 'Bar touches softly'],
+          caution: 'Use a spotter or safeties when the bar slows down.',
+        },
+      },
+      {
+        id: 'overhead-press',
+        name: 'Overhead Press',
+        category: 'Press',
+        lift: 'press',
+        pctOfMax: 0.55,
+        sets: 2,
+        reps: 5,
+        rpe: 7,
+        guide: {
+          purpose: 'Train a strict press without leaning back.',
+          cues: ['Ribs down', 'Bar close to face', 'Lock out overhead'],
+          caution: 'Reduce weight if the press turns into a back bend.',
+        },
+      },
+      {
+        id: 'barbell-row',
+        name: 'Cable Row',
+        category: 'Pull',
+        sets: 3,
+        reps: 10,
+        rpe: 7,
+        guide: {
+          purpose: 'Build upper-back strength with less setup friction.',
+          cues: ['Chest tall', 'Pull elbows back', 'Pause at ribs'],
+          caution: 'Keep the torso still instead of swinging the weight.',
+        },
+      },
+      {
+        id: 'upper-accessories',
+        name: 'Lat Pulldown',
+        category: 'Accessory',
+        sets: 2,
+        reps: 10,
+        rpe: 7,
+        guide: {
+          purpose: 'Practice pulling with shoulder blades moving cleanly.',
+          cues: ['Start tall', 'Pull to collarbone', 'Slow return'],
+          caution: 'Do not turn the rep into a lean-back row.',
+        },
+      },
     ],
   },
 ]
@@ -123,32 +232,33 @@ const seedSessions: Session[] = [
     {
       id: 'seed-session-1',
       date: '2026-08-10T10:00:00.000Z',
-      workoutName: 'Lower Strength',
+      workoutName: 'Start Lower',
       readiness: 82,
       durationMin: 58,
       prs: ['Back Squat top set'],
       sets: [
-        { exerciseId: 'back-squat', index: 0, kg: 115, reps: 5, rpe: 8, at: '2026-08-10T10:20:00.000Z' },
-        { exerciseId: 'back-squat', index: 1, kg: 115, reps: 5, rpe: 8, at: '2026-08-10T10:24:00.000Z' },
-        { exerciseId: 'back-squat', index: 2, kg: 115, reps: 5, rpe: 8.5, at: '2026-08-10T10:28:00.000Z' },
+        { exerciseId: 'back-squat', index: 0, kg: 30, reps: 5, rpe: 7, at: '2026-08-10T10:20:00.000Z' },
+        { exerciseId: 'back-squat', index: 1, kg: 30, reps: 5, rpe: 7, at: '2026-08-10T10:24:00.000Z' },
+        { exerciseId: 'back-squat', index: 2, kg: 30, reps: 5, rpe: 7.5, at: '2026-08-10T10:28:00.000Z' },
       ],
     },
     {
       id: 'seed-session-2',
       date: '2026-08-13T10:00:00.000Z',
-      workoutName: 'Upper Strength',
+      workoutName: 'Start Upper',
       readiness: 67,
       durationMin: 52,
       prs: [],
       sets: [
-        { exerciseId: 'bench-press', index: 0, kg: 72.5, reps: 5, rpe: 8, at: '2026-08-13T10:20:00.000Z' },
-        { exerciseId: 'bench-press', index: 1, kg: 72.5, reps: 5, rpe: 8.5, at: '2026-08-13T10:24:00.000Z' },
+        { exerciseId: 'bench-press', index: 0, kg: 22.5, reps: 5, rpe: 7, at: '2026-08-13T10:20:00.000Z' },
+        { exerciseId: 'bench-press', index: 1, kg: 22.5, reps: 5, rpe: 7.5, at: '2026-08-13T10:24:00.000Z' },
       ],
     },
 ]
 
 function createDefaultState(): StoredState {
   return {
+    contentVersion,
     profile,
     maxes,
     workouts,
@@ -179,6 +289,8 @@ function readState(): StoredState {
 
   try {
     const parsed = JSON.parse(saved) as Partial<StoredState>
+
+    if (parsed.contentVersion !== contentVersion) return defaultState
 
     return {
       ...defaultState,
@@ -226,6 +338,10 @@ function formatKg(value: number | null | undefined) {
 function formatRpe(value: number | null | undefined) {
   if (value === null || value === undefined) return '—'
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+function loadLabel(exercise: PlannedExercise, target: TargetResult | undefined, units: string) {
+  return exercise.lift ? `${formatKg(target?.kg)} ${units}` : 'SELF SELECTED'
 }
 
 function isLower(lift: Lift) {
@@ -285,6 +401,14 @@ function workoutSetCount(workout: Workout) {
   return workout.exercises.reduce((total, exercise) => total + exercise.sets, 0)
 }
 
+function guideFor(exercise: PlannedExercise) {
+  return exercise.guide ?? {
+    purpose: 'Use a controlled weight and keep the reps repeatable.',
+    cues: ['Move smoothly', 'Keep two reps left', 'Log the set after it is done'],
+    caution: 'If the movement changes, keep the load the same next time.',
+  }
+}
+
 function makeId(value: string) {
   const base = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   return `${base || 'exercise'}-${Date.now().toString(36)}`
@@ -335,11 +459,11 @@ function App() {
   const verdict = (focusTarget?.adj ?? 0) === 0
     ? {
         badge: 'PLAN HELD',
-        sentence: 'Green day. Sleep and soreness are inside range — run the targets as written.',
+        sentence: 'Green day. Use the listed start weight and keep two clean reps in reserve.',
       }
     : {
         badge: `${focusTarget?.adj ?? 0}% ADJUSTED`,
-        sentence: 'Yellow day. Sleep and leg soreness are built into today\'s main lift targets.',
+        sentence: 'Yellow day. The start weight is pulled back so technique stays stable.',
       }
 
   useEffect(() => {
@@ -762,7 +886,7 @@ function Today({
   targetMap: Map<string, TargetResult>
   verdict: { badge: string; sentence: string }
 }) {
-  const targetLabel = focusTarget?.exercise.name ? `${focusTarget.exercise.name} target` : 'Target'
+  const targetLabel = focusTarget?.exercise.name ? `${focusTarget.exercise.name} start weight` : 'Start weight'
   const previewExercises = activeWorkout.exercises.slice(0, 2)
   const hiddenExerciseCount = Math.max(0, activeWorkout.exercises.length - previewExercises.length)
 
@@ -807,18 +931,22 @@ function Today({
         </div>
 
         <button className="primary-button decision-button" onClick={() => startWorkout(activeWorkout.id)} type="button">
-          <span>Start {activeWorkout.name}</span>
+          <span>{activeWorkout.name}</span>
           <span>Begin</span>
         </button>
+
+        <p className="beginner-note">Work one exercise at a time. Log the set, rest three minutes, repeat the listed reps.</p>
 
         <div className="session-preview">
           {previewExercises.map((exercise, index) => {
           const target = targetMap.get(exercise.id)
+          const guide = guideFor(exercise)
           return (
             <div className="target-row" key={exercise.id}>
               <div>
                 <strong>{String(index + 1).padStart(2, '0')} · {exercise.name}</strong>
                 <p>{exercise.lift ? target?.basis : `${exercise.sets} × ${exercise.reps} · left alone`}</p>
+                <small>{guide.cues[0]}</small>
               </div>
               <p>{exercise.lift ? formatKg(target?.kg) : `${exercise.sets}×${exercise.reps}`} <span>{exercise.lift ? profile.units : ''}</span></p>
               <em className={(target?.adj ?? 0) === 0 ? 'sage-text' : 'amber-text'}>{exercise.lift ? target?.adj === 0 ? 'held' : `${target?.adj}%` : 'base'}</em>
@@ -1098,9 +1226,18 @@ function Log({
       </div>
       <header className="day-head compact">
         <h1>{activeExercise.name}</h1>
-        <p className="mono-line">{activeWorkout.name} · TARGET {formatKg(activeTarget?.kg)} KG</p>
-        <p>{activeTarget?.adj === 0 ? 'Plan held. Load is written as prescribed.' : `${activeTarget?.adj}% from readiness · sleep and leg soreness are in the number.`}</p>
+        <p className="mono-line">{activeWorkout.name} · START {loadLabel(activeExercise, activeTarget, 'KG')}</p>
+        <p>{activeTarget?.adj === 0 ? 'Plan held. Keep the reps controlled.' : `${activeTarget?.adj}% from readiness. The weight is reduced before the first set.`}</p>
       </header>
+
+      <section className="coach-guide">
+        <h2 className="section-label">Do this</h2>
+        <p>{guideFor(activeExercise).purpose}</p>
+        <div>
+          {guideFor(activeExercise).cues.map((cue) => <span key={cue}>{cue}</span>)}
+        </div>
+        <em>{guideFor(activeExercise).caution}</em>
+      </section>
 
       <section className="set-table">
         <div className="set-head">
@@ -1142,7 +1279,7 @@ function Log({
           )
         })}
       </section>
-      <p className="helper">Tap a set to log it. Rest starts on its own.</p>
+      <p className="helper">Tap a set after it is done. Rest starts on its own.</p>
 
       <section className="then-list">
         <h2 className="section-label">Then</h2>
@@ -1152,7 +1289,7 @@ function Log({
               <span>{exercise.name}</span>
               <small>{exercise.category}</small>
             </div>
-            <em>{exercise.sets} × {exercise.reps}{exercise.lift ? ` · ${formatKg(targetMap.get(exercise.id)?.kg)} KG` : ''}</em>
+            <em>{exercise.sets} × {exercise.reps} · {loadLabel(exercise, targetMap.get(exercise.id), 'KG')}</em>
           </div>
         ))}
       </section>
@@ -1184,7 +1321,7 @@ function History({ queued, sessions }: { queued: number; sessions: Session[] }) 
               <strong className={session.readiness >= 70 ? 'sage-text' : 'amber-text'}>{session.readiness}</strong>
               <div>
                 <div><h2>{session.workoutName}</h2><time>{dateLabel(session.date)}</time></div>
-                <p>{session.durationMin} min · 4 exercises · full load</p>
+                <p>{session.durationMin} min · controlled reps · logged in order</p>
                 <em>{top ? `${top.exerciseId.replace('-', ' ').toUpperCase()} ${formatKg(top.kg)} × ${top.reps} · ${session.prs[0] ?? 'TOP SET'}` : 'NO SETS'}</em>
               </div>
             </article>
@@ -1257,7 +1394,7 @@ function Progress({
       </div>
       <header className="day-head compact">
         <h1>Progress</h1>
-        <p>Six weeks of logged top sets. No trophies, no streaks — just the number going up.</p>
+        <p>Top sets show whether the same movement is getting steadier before it gets heavier.</p>
       </header>
       <section className="progress-list">
         {allRows.map((row, index) => (
@@ -1270,8 +1407,8 @@ function Progress({
       </section>
       <section className="also-moving">
         <h2 className="section-label">Recent PRs</h2>
-        <div><span>Back Squat</span><strong>115 × 5</strong></div>
-        <div><span>Bench Press</span><strong>72.5 × 5</strong></div>
+        <div><span>Back Squat</span><strong>30 × 5</strong></div>
+        <div><span>Bench Press</span><strong>22.5 × 5</strong></div>
       </section>
 
       <section className="setup-panel">
