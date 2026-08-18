@@ -667,23 +667,15 @@ function App() {
         {tab === 'today' && (
             <Today
               activeWorkout={activeWorkout}
-              addCustomExercise={addCustomExercise}
-              adjustExercise={adjustExercise}
               focusTarget={focusTarget}
               patchCheckin={patchCheckin}
             profile={state.profile}
-            removeExercise={removeExercise}
-            resetLocalData={resetLocalData}
             score={score}
-            setExerciseLift={setExerciseLift}
-            setTodayWorkout={setTodayWorkout}
             showWhy={showWhy}
             startWorkout={startWorkout}
             state={state}
             syncNow={syncNow}
             targetMap={targetMap}
-            updateMax={updateMax}
-            updateExercise={updateExercise}
             verdict={verdict}
             setShowWhy={setShowWhy}
           />
@@ -714,10 +706,21 @@ function App() {
         {tab === 'history' && <History queued={state.sync.queued} sessions={state.sessions} />}
         {tab === 'progress' && (
           <Progress
+            activeWorkout={activeWorkout}
+            addCustomExercise={addCustomExercise}
+            adjustExercise={adjustExercise}
+            profile={state.profile}
+            removeExercise={removeExercise}
+            resetLocalData={resetLocalData}
             selectedLift={state.selectedLift}
+            setExerciseLift={setExerciseLift}
             sessions={state.sessions}
             setSelectedLift={(selectedLift) => setState((current) => ({ ...current, selectedLift }))}
+            setTodayWorkout={setTodayWorkout}
+            state={state}
             target={selectedTarget ? targetMap.get(selectedTarget.id) : undefined}
+            updateMax={updateMax}
+            updateExercise={updateExercise}
           />
         )}
       </section>
@@ -734,49 +737,34 @@ function App() {
 
 function Today({
   activeWorkout,
-  addCustomExercise,
-  adjustExercise,
   focusTarget,
   patchCheckin,
   profile,
-  removeExercise,
-  resetLocalData,
   score,
-  setExerciseLift,
   setShowWhy,
-  setTodayWorkout,
   showWhy,
   startWorkout,
   state,
   syncNow,
   targetMap,
-  updateMax,
-  updateExercise,
   verdict,
 }: {
   activeWorkout: Workout
-  addCustomExercise: (workoutId: string, draft: ExerciseDraft) => void
-  adjustExercise: (workoutId: string, exerciseId: string, field: 'sets' | 'reps' | 'pctOfMax' | 'rpe', delta: number) => void
   focusTarget?: TargetResult
   patchCheckin: (next: Partial<Checkin>) => void
   profile: Profile
-  removeExercise: (workoutId: string, exerciseId: string) => void
-  resetLocalData: () => void
   score: number
-  setExerciseLift: (workoutId: string, exerciseId: string, lift: Lift | 'none') => void
   setShowWhy: (value: boolean) => void
-  setTodayWorkout: (workoutId: string) => void
   showWhy: boolean
   startWorkout: (workoutId?: string) => void
   state: StoredState
   syncNow: () => void
   targetMap: Map<string, TargetResult>
-  updateMax: (lift: Lift, delta: number) => void
-  updateExercise: (workoutId: string, exerciseId: string, patch: Partial<PlannedExercise>) => void
   verdict: { badge: string; sentence: string }
 }) {
-  const mainTargets = state.workouts.flatMap((workout) => workout.exercises.filter((exercise) => exercise.lift))
   const targetLabel = focusTarget?.exercise.name ? `${focusTarget.exercise.name} target` : 'Target'
+  const previewExercises = activeWorkout.exercises.slice(0, 2)
+  const hiddenExerciseCount = Math.max(0, activeWorkout.exercises.length - previewExercises.length)
 
   return (
     <>
@@ -810,80 +798,48 @@ function Today({
         )}
       </section>
 
+      <section className="targets-list">
+        <h2 className="section-label">Today&apos;s workout</h2>
+        <div className="workout-summary">
+          <span>{activeWorkout.name}</span>
+          <strong>{workoutSetCount(activeWorkout)} SETS</strong>
+          <p>{activeWorkout.detail}</p>
+        </div>
+
+        <button className="primary-button decision-button" onClick={() => startWorkout(activeWorkout.id)} type="button">
+          <span>Start {activeWorkout.name}</span>
+          <span>Begin</span>
+        </button>
+
+        <div className="session-preview">
+          {previewExercises.map((exercise, index) => {
+          const target = targetMap.get(exercise.id)
+          return (
+            <div className="target-row" key={exercise.id}>
+              <div>
+                <strong>{String(index + 1).padStart(2, '0')} · {exercise.name}</strong>
+                <p>{exercise.lift ? target?.basis : `${exercise.sets} × ${exercise.reps} · left alone`}</p>
+              </div>
+              <p>{exercise.lift ? formatKg(target?.kg) : `${exercise.sets}×${exercise.reps}`} <span>{exercise.lift ? profile.units : ''}</span></p>
+              <em className={(target?.adj ?? 0) === 0 ? 'sage-text' : 'amber-text'}>{exercise.lift ? target?.adj === 0 ? 'held' : `${target?.adj}%` : 'base'}</em>
+            </div>
+          )
+        })}
+          {hiddenExerciseCount > 0 && <p className="preview-more">{hiddenExerciseCount} more in Log.</p>}
+        </div>
+      </section>
+
       <section className="checkin">
+        <h2 className="section-label">Readiness check</h2>
         <CheckinRow label="Overall" value={state.checkin.overall} words={readouts.overall} onChange={(overall) => patchCheckin({ overall })} />
         <CheckinRow label="Sleep" value={state.checkin.sleep} words={readouts.sleep} onChange={(sleep) => patchCheckin({ sleep })} />
         <CheckinRow label="Leg soreness" value={state.checkin.soreness} words={readouts.soreness} onChange={(soreness) => patchCheckin({ soreness })} />
       </section>
 
-      <section className="targets-list">
-        <h2 className="section-label">Today&apos;s targets</h2>
-        {mainTargets.map((exercise) => {
-          const target = targetMap.get(exercise.id)
-          return (
-            <div className="target-row" key={exercise.id}>
-              <div>
-                <strong>{exercise.name}</strong>
-                <p>{target?.basis}</p>
-              </div>
-              <p>{formatKg(target?.kg)} <span>{profile.units}</span></p>
-              <em className={(target?.adj ?? 0) === 0 ? 'sage-text' : 'amber-text'}>{target?.adj === 0 ? 'held' : `${target?.adj}%`}</em>
-            </div>
-          )
-        })}
-        <p className="footnote">Percentages come from your check-in, not from a mood. Accessories are left alone.</p>
-      </section>
-
-      <section className="maxes-list">
-        <h2 className="section-label">Working maxes</h2>
-        {(['squat', 'bench', 'deadlift', 'press'] as Lift[]).map((lift) => (
-          <MaxRow key={lift} lift={lift} units={profile.units} value={state.maxes[lift]} updateMax={updateMax} />
-        ))}
-      </section>
-
-      <section className="session-list">
-        <h2 className="section-label">Today&apos;s workout</h2>
-        {state.workouts.map((workout) => (
-          <button
-            className={workout.id === activeWorkout.id ? 'session-choice today-choice' : 'session-choice'}
-            key={workout.id}
-            onClick={() => setTodayWorkout(workout.id)}
-            type="button"
-          >
-            <span>{workout.name}</span>
-            <p>{workout.detail}</p>
-            <em>{workout.id === activeWorkout.id ? 'TODAY' : `${workoutSetCount(workout)} SETS`}</em>
-          </button>
-        ))}
-      </section>
-
-      <section className="builder-list">
-        <h2 className="section-label">Workout editor</h2>
-        {activeWorkout.exercises.map((exercise) => (
-          <ExerciseEditor
-            adjustExercise={adjustExercise}
-            exercise={exercise}
-            key={exercise.id}
-            removeExercise={removeExercise}
-            setExerciseLift={setExerciseLift}
-            updateExercise={updateExercise}
-            workoutId={activeWorkout.id}
-          />
-        ))}
-        <AddExerciseForm addCustomExercise={addCustomExercise} workoutId={activeWorkout.id} />
-      </section>
-
-      <button className="primary-button" onClick={() => startWorkout(activeWorkout.id)} type="button">
-        <span>Start {activeWorkout.name}</span>
-        <span>Start</span>
-      </button>
-
       <div className="sync-line">
         <span>● {state.sync.online ? 'ONLINE' : 'OFFLINE'} · {state.sync.queued} CHANGE WAITING</span>
         <button onClick={syncNow} type="button">Sync</button>
       </div>
-
-      <button className="reset-button" onClick={resetLocalData} type="button">Reset local data</button>
     </>
   )
 }
@@ -1240,15 +1196,37 @@ function History({ queued, sessions }: { queued: number; sessions: Session[] }) 
 }
 
 function Progress({
+  activeWorkout,
+  addCustomExercise,
+  adjustExercise,
+  profile,
+  removeExercise,
+  resetLocalData,
   selectedLift,
+  setExerciseLift,
   sessions,
   setSelectedLift,
+  setTodayWorkout,
+  state,
   target,
+  updateMax,
+  updateExercise,
 }: {
+  activeWorkout: Workout
+  addCustomExercise: (workoutId: string, draft: ExerciseDraft) => void
+  adjustExercise: (workoutId: string, exerciseId: string, field: 'sets' | 'reps' | 'pctOfMax' | 'rpe', delta: number) => void
+  profile: Profile
+  removeExercise: (workoutId: string, exerciseId: string) => void
+  resetLocalData: () => void
   selectedLift: Lift
+  setExerciseLift: (workoutId: string, exerciseId: string, lift: Lift | 'none') => void
   sessions: Session[]
   setSelectedLift: (lift: Lift) => void
+  setTodayWorkout: (workoutId: string) => void
+  state: StoredState
   target?: TargetResult
+  updateMax: (lift: Lift, delta: number) => void
+  updateExercise: (workoutId: string, exerciseId: string, patch: Partial<PlannedExercise>) => void
 }) {
   const liftNames: Record<Lift, string> = {
     squat: 'Back Squat',
@@ -1294,6 +1272,51 @@ function Progress({
         <h2 className="section-label">Recent PRs</h2>
         <div><span>Back Squat</span><strong>115 × 5</strong></div>
         <div><span>Bench Press</span><strong>72.5 × 5</strong></div>
+      </section>
+
+      <section className="setup-panel">
+        <h2 className="section-label">Setup</h2>
+
+        <section className="session-list">
+          <h3 className="subsection-label">Today&apos;s workout</h3>
+          {state.workouts.map((workout) => (
+            <button
+              className={workout.id === activeWorkout.id ? 'session-choice today-choice' : 'session-choice'}
+              key={workout.id}
+              onClick={() => setTodayWorkout(workout.id)}
+              type="button"
+            >
+              <span>{workout.name}</span>
+              <p>{workout.detail}</p>
+              <em>{workout.id === activeWorkout.id ? 'TODAY' : `${workoutSetCount(workout)} SETS`}</em>
+            </button>
+          ))}
+        </section>
+
+        <section className="maxes-list">
+          <h3 className="subsection-label">Working maxes</h3>
+          {(['squat', 'bench', 'deadlift', 'press'] as Lift[]).map((lift) => (
+            <MaxRow key={lift} lift={lift} units={profile.units} value={state.maxes[lift]} updateMax={updateMax} />
+          ))}
+        </section>
+
+        <section className="builder-list">
+          <h3 className="subsection-label">Workout editor</h3>
+          {activeWorkout.exercises.map((exercise) => (
+            <ExerciseEditor
+              adjustExercise={adjustExercise}
+              exercise={exercise}
+              key={exercise.id}
+              removeExercise={removeExercise}
+              setExerciseLift={setExerciseLift}
+              updateExercise={updateExercise}
+              workoutId={activeWorkout.id}
+            />
+          ))}
+          <AddExerciseForm addCustomExercise={addCustomExercise} workoutId={activeWorkout.id} />
+        </section>
+
+        <button className="reset-button" onClick={resetLocalData} type="button">Reset local data</button>
       </section>
     </>
   )
