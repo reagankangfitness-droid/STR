@@ -1091,6 +1091,80 @@ button:disabled {
   color: var(--ink);
 }
 
+.distribution-chart {
+  margin-top: 22px;
+}
+
+.radar-wrap {
+  padding: 12px 0 4px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.radar-wrap svg {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.radar-ring,
+.radar-axis {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 1.2;
+}
+
+.radar-axis {
+  stroke: var(--rule-soft);
+}
+
+.radar-current {
+  fill: rgba(61, 139, 95, 0.16);
+  stroke: var(--sage);
+  stroke-width: 2.8;
+}
+
+.radar-previous {
+  fill: rgba(26, 24, 21, 0.08);
+  stroke: rgba(26, 24, 21, 0.38);
+  stroke-width: 2.2;
+}
+
+.radar-label {
+  fill: var(--ink-50);
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.radar-legend {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  min-height: 44px;
+  padding-top: 12px;
+  color: var(--ink-50);
+  font-size: 12.5px;
+  font-weight: 300;
+}
+
+.radar-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.radar-legend i {
+  display: block;
+  width: 12px;
+  height: 12px;
+  background: var(--sage);
+}
+
+.radar-legend span + span i {
+  background: rgba(26, 24, 21, 0.38);
+}
+
 .progress-list {
   display: grid;
   gap: 13px;

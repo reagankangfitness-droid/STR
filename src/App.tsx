@@ -3,6 +3,7 @@ import './App.css'
 
 type Tab = 'today' | 'log' | 'history' | 'progress'
 type Lift = 'squat' | 'bench' | 'deadlift' | 'press'
+type BodyArea = 'Back' | 'Chest' | 'Core' | 'Shoulders' | 'Arms' | 'Legs'
 
 type Profile = { name: string; level: 'Novice' | 'Intermediate' | 'Advanced'; units: 'kg' | 'lb' }
 type Maxes = { squat: number; bench: number; deadlift: number; press: number }
@@ -94,10 +95,17 @@ type TargetResult = {
   factors: Array<{ label: string; value: number }>
 }
 
+type DistributionPoint = {
+  label: BodyArea
+  current: number
+  previous: number
+}
+
 const storageKey = 'sb.v1'
 const contentVersion = 'beginner-v2'
 const tabs: Tab[] = ['today', 'log', 'history', 'progress']
 const restSeconds = 180
+const bodyAreas: BodyArea[] = ['Back', 'Chest', 'Core', 'Shoulders', 'Arms', 'Legs']
 
 const profile: Profile = { name: 'Reagan', level: 'Novice', units: 'kg' }
 const maxes: Maxes = { squat: 60, bench: 40, deadlift: 80, press: 25 }
@@ -495,6 +503,63 @@ function dateLabel(date: string | Date = new Date()) {
 
 function workoutSetCount(workout: Workout) {
   return workout.exercises.reduce((total, exercise) => total + exercise.sets, 0)
+}
+
+function emptyDistribution() {
+  return bodyAreas.reduce((scores, area) => ({ ...scores, [area]: 0 }), {} as Record<BodyArea, number>)
+}
+
+function exerciseAreaWeights(exercise: PlannedExercise): Partial<Record<BodyArea, number>> {
+  const name = exercise.name.toLowerCase()
+
+  if (exercise.category === 'Squat' || name.includes('squat') || name.includes('curl')) return { Legs: 1 }
+  if (exercise.category === 'Deadlift') return { Legs: 0.55, Back: 0.3, Core: 0.15 }
+  if (exercise.category === 'Hinge') return { Legs: 0.55, Back: 0.35, Core: 0.1 }
+  if (exercise.category === 'Bench') return { Chest: 0.65, Arms: 0.2, Shoulders: 0.15 }
+  if (exercise.category === 'Press') return { Shoulders: 0.55, Arms: 0.25, Chest: 0.2 }
+  if (exercise.category === 'Pull' || name.includes('row') || name.includes('pulldown')) return { Back: 0.65, Arms: 0.25, Core: 0.1 }
+  if (name.includes('push-up')) return { Chest: 0.5, Arms: 0.3, Shoulders: 0.2 }
+  if (name.includes('carry')) return { Core: 0.4, Arms: 0.25, Back: 0.2, Legs: 0.15 }
+
+  return { Arms: 0.4, Core: 0.3, Shoulders: 0.3 }
+}
+
+function addDistributionLoad(scores: Record<BodyArea, number>, exercise: PlannedExercise, load: number) {
+  const weights = exerciseAreaWeights(exercise)
+  Object.entries(weights).forEach(([area, weight]) => {
+    scores[area as BodyArea] += load * (weight ?? 0)
+  })
+}
+
+function plannedDistribution(workouts: Workout[]) {
+  const scores = emptyDistribution()
+  workouts.forEach((workout) => {
+    workout.exercises.forEach((exercise) => addDistributionLoad(scores, exercise, exercise.sets * exercise.reps))
+  })
+  return scores
+}
+
+function sessionDistribution(sessions: Session[], workouts: Workout[]) {
+  const scores = emptyDistribution()
+  const exercises = new Map(workouts.flatMap((workout) => workout.exercises).map((exercise) => [exercise.id, exercise]))
+
+  sessions.forEach((session) => {
+    session.sets.forEach((set) => {
+      const exercise = exercises.get(set.exerciseId)
+      if (exercise) addDistributionLoad(scores, exercise, set.reps)
+    })
+  })
+
+  return scores
+}
+
+function normalizeDistribution(current: Record<BodyArea, number>, previous: Record<BodyArea, number>): DistributionPoint[] {
+  const max = Math.max(...bodyAreas.flatMap((area) => [current[area], previous[area]]), 1)
+  return bodyAreas.map((label) => ({
+    label,
+    current: current[label] / max,
+    previous: previous[label] / max,
+  }))
 }
 
 function guideFor(exercise: PlannedExercise) {
@@ -1560,6 +1625,7 @@ function Progress({
   const targetRow = { date: new Date().toISOString(), kg: target?.kg ?? 0, label: 'TODAY', current: false }
   const allRows = [targetRow, ...rows]
   const max = Math.max(...allRows.map((row) => row.kg), 1)
+  const distribution = normalizeDistribution(plannedDistribution(state.workouts), sessionDistribution(sessions, state.workouts))
 
   return (
     <>
@@ -1573,6 +1639,7 @@ function Progress({
         <h1>Progress</h1>
         <p>Top sets show whether the same movement is getting steadier before it gets heavier.</p>
       </header>
+      <DistributionChart points={distribution} />
       <section className="progress-list">
         {allRows.map((row, index) => (
           <div className="progress-row" key={`${row.date}-${index}`}>
@@ -1637,6 +1704,68 @@ function Progress({
         <button className="reset-button" onClick={resetLocalData} type="button">Reset local data</button>
       </section>
     </>
+  )
+}
+
+function DistributionChart({ points }: { points: DistributionPoint[] }) {
+  const center = 160
+  const radius = 102
+  const angles: Record<BodyArea, number> = {
+    Back: -120,
+    Chest: -60,
+    Core: 0,
+    Shoulders: 60,
+    Arms: 120,
+    Legs: 180,
+  }
+
+  function pointFor(label: BodyArea, value: number) {
+    const angle = (angles[label] * Math.PI) / 180
+    return {
+      x: center + Math.cos(angle) * radius * value,
+      y: center + Math.sin(angle) * radius * value,
+    }
+  }
+
+  function polygonFor(key: 'current' | 'previous') {
+    return points.map((point) => {
+      const coords = pointFor(point.label, point[key])
+      return `${coords.x},${coords.y}`
+    }).join(' ')
+  }
+
+  return (
+    <section className="distribution-chart">
+      <h2 className="section-label">Training balance</h2>
+      <div className="radar-wrap">
+        <svg aria-label="Training distribution by body area" role="img" viewBox="0 0 320 320">
+          {[0.25, 0.5, 0.75, 1].map((level) => (
+            <polygon className="radar-ring" key={level} points={points.map((point) => {
+              const coords = pointFor(point.label, level)
+              return `${coords.x},${coords.y}`
+            }).join(' ')} />
+          ))}
+          {points.map((point) => {
+            const end = pointFor(point.label, 1)
+            const label = pointFor(point.label, 1.18)
+            return (
+              <g key={point.label}>
+                <line className="radar-axis" x1={center} x2={end.x} y1={center} y2={end.y} />
+                <text className="radar-label" dominantBaseline="middle" textAnchor={label.x < center - 8 ? 'end' : label.x > center + 8 ? 'start' : 'middle'} x={label.x} y={label.y}>
+                  {point.label}
+                </text>
+              </g>
+            )
+          })}
+          <polygon className="radar-previous" points={polygonFor('previous')} />
+          <polygon className="radar-current" points={polygonFor('current')} />
+        </svg>
+      </div>
+      <div className="radar-legend">
+        <span><i /> Current plan</span>
+        <span><i /> Recent logs</span>
+      </div>
+    </section>
   )
 }
 
